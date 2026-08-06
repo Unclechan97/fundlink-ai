@@ -29,20 +29,20 @@ class LlmGatewayTest {
 
     @Test
     void shouldReturnChatResponseForKnownProvider() {
-        LlmRequest request = LlmRequest.of("fake", "fake-model",
+        LlmRequest request = LlmRequest.of("deepseek", "fake-model",
                 "请生成资金方字段映射", "trace-001");
 
         LlmResponse response = gateway.chat(request);
 
         assertThat(response.getContent()).isNotBlank();
-        assertThat(response.getProvider()).isEqualTo("fake");
+        assertThat(response.getProvider()).isEqualTo("deepseek");
         assertThat(response.getModel()).isEqualTo("fake-model");
         assertThat(response.getTokenUsage()).isNotNull();
     }
 
     @Test
     void shouldAuditEveryLlmCall() {
-        LlmRequest request = LlmRequest.of("fake", "fake-model",
+        LlmRequest request = LlmRequest.of("deepseek", "fake-model",
                 "测试审计", "trace-audit");
 
         gateway.chat(request);
@@ -53,7 +53,7 @@ class LlmGatewayTest {
         );
         assertThat(audits).hasSize(1);
         AiLlmAudit audit = audits.get(0);
-        assertThat(audit.getProvider()).isEqualTo("FAKE");
+        assertThat(audit.getProvider()).isEqualTo("DEEPSEEK");
         assertThat(audit.getSuccess()).isEqualTo(1);
     }
 
@@ -69,7 +69,7 @@ class LlmGatewayTest {
 
     @Test
     void shouldTrackTokenUsageAndCost() {
-        LlmRequest request = LlmRequest.of("fake", "fake-model",
+        LlmRequest request = LlmRequest.of("deepseek", "fake-model",
                 "测试 token 统计", "trace-tokens");
 
         LlmResponse response = gateway.chat(request);
