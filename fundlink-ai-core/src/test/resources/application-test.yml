@@ -1,0 +1,24 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:fundlink_ai_test;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema-ai.sql
+  ai:
+    openai:
+      api-key: test-key-not-used
+    retry:
+      max-attempts: 1
+
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: auto
+      table-prefix: ai_
+
+logging:
+  level:
+    com.fundlink.ai: DEBUG
