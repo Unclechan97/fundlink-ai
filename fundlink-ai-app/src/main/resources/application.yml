@@ -1,0 +1,57 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: fundlink-ai
+  datasource:
+    url: jdbc:mysql://localhost:3306/fundlink?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:}
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:db/schema-ai.sql
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  global-config:
+    db-config:
+      id-type: auto
+      table-prefix: ai_
+
+# LLM Provider 配置（开发环境）
+fundlink:
+  llm:
+    providers:
+      deepseek:
+        base-url: https://api.deepseek.com/v1
+        api-key: ${DEEPSEEK_API_KEY:}
+        default-model: deepseek-chat
+      claude:
+        base-url: https://api.anthropic.com/v1
+        api-key: ${ANTHROPIC_API_KEY:}
+        default-model: claude-haiku-4-5-20251001
+      qwen:
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        api-key: ${QWEN_API_KEY:}
+        default-model: qwen-plus
+    # 路由策略
+    router:
+      default-provider: deepseek
+      fallback-chain: deepseek,claude,qwen
+      retry-max: 2
+
+# RAG 服务地址
+fundlink:
+  rag:
+    base-url: http://localhost:8000
+
+# FundLink 服务地址（调现有 API 写入配置）
+fundlink:
+  admin:
+    base-url: http://localhost:8080
+
+logging:
+  level:
+    com.fundlink.ai: DEBUG
