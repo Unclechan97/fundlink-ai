@@ -123,6 +123,12 @@ public class PromptBuilder {
 4. confidence: 精确=0.95, 推断=0.85, 模糊=0.70
 5. fund_field 必须来自接口文档
 
+## 流程 DSL 规则
+1. 如果接口文档中包含"业务流程"章节，严格按文档描述的流程生成节点（含条件分支）
+2. 文档无流程时使用默认序列: START→DATA_COLLECT(RISK)→DATA_COLLECT(CORE)→DATA_COLLECT(PAYMENT)→TEMPLATE_RENDER→SEND_TO_FUND→END
+3. 条件分支: CONDITION 节点配 SpEL 表达式, 边的 conditionExpr 如 "#root.riskData.level == 'A'"
+4. dataSourceCode: RISK/CORE/PAYMENT | outputKey: riskData/userInfo/paymentData
+
 ## 可用函数
 - formatAmount(BigDecimal)→"100000.00"
 - enumMap(enumType,internalValue)→外部枚举值
