@@ -135,24 +135,29 @@ public class ConfigWriter {
             }
         }
 
-        // CONDITION 节点出边: 自动补 label
+        // CONDITION 节点: 补 label + 同步 expression 到节点 config(给前端展示)
         for (FlowNode node : dsl.getNodes()) {
             if ("CONDITION".equals(node.getType())) {
                 List<FlowEdge> outEdges = new ArrayList<>();
                 for (FlowEdge e : dsl.getEdges()) {
                     if (node.getId().equals(e.getSource())) outEdges.add(e);
                 }
+                Map<String, Object> nd = node.getData();
+                Map<String, Object> nodeCfg = nd != null ? (Map<String, Object>) nd.get("config") : null;
+                if (nodeCfg == null) { nodeCfg = new LinkedHashMap<>(); nd.put("config", nodeCfg); }
+
                 for (int i = 0; i < outEdges.size(); i++) {
                     FlowEdge e = outEdges.get(i);
                     if (e.getLabel() == null || e.getLabel().isEmpty()) {
-                        // 有 conditionExpr 的边设 label
                         if (e.getConditionExpr() != null && !e.getConditionExpr().isEmpty()) {
-                            e.setLabel(i == 0 ? "通过" : "拒绝");  // 默认: 第一条=true, 第二条=false
-                        }
-                        // 最后一条无条件边设为默认分支
-                        else if (i == outEdges.size() - 1 && outEdges.stream().anyMatch(x -> x.getConditionExpr() != null)) {
+                            e.setLabel(i == 0 ? "通过" : "拒绝");
+                        } else if (i == outEdges.size() - 1 && outEdges.stream().anyMatch(x -> x.getConditionExpr() != null)) {
                             e.setLabel("否则");
                         }
+                    }
+                    // 第一个有条件表达式的边 → 同步到节点，前端点击CONDITION节点可以展示
+                    if (i == 0 && e.getConditionExpr() != null && !e.getConditionExpr().isEmpty() && !nodeCfg.containsKey("expression")) {
+                        nodeCfg.put("expression", e.getConditionExpr());
                     }
                 }
             }
