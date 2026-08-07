@@ -23,6 +23,7 @@ public class LlmGatewayImpl implements LlmGateway {
 
     private final Map<String, LlmProvider> providers;
     private final AiLlmAuditMapper auditMapper;
+    private final PiiRedactor piiRedactor;
 
     @Override
     public LlmResponse chat(LlmRequest request) {

@@ -1,0 +1,72 @@
+version: "3.8"
+
+services:
+  # MySQL 数据库（与 FundLink 共享）
+  mysql:
+    image: mysql:8.0
+    container_name: fundlink-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-fundlink123}
+      MYSQL_DATABASE: fundlink
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./fundlink-ai-app/src/main/resources/db/schema-ai.sql:/docker-entrypoint-initdb.d/01-ai.sql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+
+  # Qdrant 向量数据库（RAG 系统共享）
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: fundlink-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  # RAG 知识库服务 (Python FastAPI)
+  rag:
+    build:
+      context: ../rag-system
+      dockerfile: Dockerfile
+    container_name: fundlink-rag
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - JWT_SECRET=${JWT_SECRET:-fundlink-prod-secret}
+    volumes:
+      - ../rag-system:/app
+      - ../信贷知识库:/knowledge
+    depends_on:
+      - qdrant
+
+  # FundLink AI 后端 (Java Spring Boot)
+  fundlink-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fundlink-ai-app
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/fundlink?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-fundlink123}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - QWEN_API_KEY=${QWEN_API_KEY}
+      - FUNDLINK_LLM_ENCRYPT_KEY=${ENCRYPT_KEY:-prod-encrypt-key}
+      - FUNDLINK_RAG_BASE_URL=http://rag:8000
+      - FUNDLINK_ADMIN_BASE_URL=http://host.docker.internal:8080
+    depends_on:
+      - mysql
+      - rag
+
+volumes:
+  mysql_data:
+  qdrant_data:
