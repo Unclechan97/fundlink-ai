@@ -135,22 +135,23 @@ public class ConfigWriter {
             }
         }
 
-        // CONDITION 节点: 把 config.conditionExpr 移到出边上
+        // CONDITION 节点出边: 自动补 label
         for (FlowNode node : dsl.getNodes()) {
-            if ("CONDITION".equals(node.getType()) && node.getData() != null) {
-                Map<String, Object> config = (Map<String, Object>) node.getData().get("config");
-                String expr = config != null ? (String) config.remove("conditionExpr") : null;
-                if (expr != null) {
-                    List<FlowEdge> condEdges = new ArrayList<>();
-                    for (FlowEdge e : dsl.getEdges()) {
-                        if (node.getId().equals(e.getSource())) condEdges.add(e);
-                    }
-                    if (!condEdges.isEmpty()) {
-                        condEdges.get(0).setLabel("满足条件");
-                        condEdges.get(0).setConditionExpr(expr);
-                        // 第二条边(如果有)设为 else
-                        if (condEdges.size() > 1) {
-                            condEdges.get(1).setLabel("否则");
+            if ("CONDITION".equals(node.getType())) {
+                List<FlowEdge> outEdges = new ArrayList<>();
+                for (FlowEdge e : dsl.getEdges()) {
+                    if (node.getId().equals(e.getSource())) outEdges.add(e);
+                }
+                for (int i = 0; i < outEdges.size(); i++) {
+                    FlowEdge e = outEdges.get(i);
+                    if (e.getLabel() == null || e.getLabel().isEmpty()) {
+                        // 有 conditionExpr 的边设 label
+                        if (e.getConditionExpr() != null && !e.getConditionExpr().isEmpty()) {
+                            e.setLabel(i == 0 ? "通过" : "拒绝");  // 默认: 第一条=true, 第二条=false
+                        }
+                        // 最后一条无条件边设为默认分支
+                        else if (i == outEdges.size() - 1 && outEdges.stream().anyMatch(x -> x.getConditionExpr() != null)) {
+                            e.setLabel("否则");
                         }
                     }
                 }
