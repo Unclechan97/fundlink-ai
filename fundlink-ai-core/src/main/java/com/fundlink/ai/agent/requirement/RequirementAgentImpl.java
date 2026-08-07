@@ -2,6 +2,7 @@ package com.fundlink.ai.agent.requirement;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fundlink.ai.agent.PromptEnhancer;
 import com.fundlink.ai.gateway.LlmGateway;
 import com.fundlink.ai.gateway.LlmRequest;
 import com.fundlink.ai.gateway.LlmResponse;
@@ -20,12 +21,15 @@ import java.util.UUID;
 public class RequirementAgentImpl implements RequirementAgent {
 
     private final LlmGateway llmGateway;
+    private final PromptEnhancer enhancer;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
     public RequirementResult analyze(String documentText, String providerCode) {
         String traceId = "req-" + UUID.randomUUID().toString().substring(0, 8);
-        String prompt = buildPrompt(documentText, providerCode);
+        String basePrompt = buildPrompt(documentText, providerCode);
+        // Few-shot 增强: 从 RAG 检索相关案例注入 Prompt
+        String prompt = enhancer.enhance(basePrompt, "字段映射 " + providerCode);
         LlmRequest request = LlmRequest.of("deepseek", "deepseek-chat", prompt, traceId);
         LlmResponse response = llmGateway.chat(request);
         return parseResponse(response.getContent());

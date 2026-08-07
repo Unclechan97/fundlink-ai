@@ -11,6 +11,7 @@ public class LlmRequest {
     private String prompt;
     private double temperature = 0.3;
     private int maxTokens = 4096;
+    private String taskType;  // simple/requirement/testgen/diagnosis/complex
     private String traceId;
 
     public static LlmRequest of(String provider, String model, String prompt, String traceId) {
