@@ -23,7 +23,7 @@ public class TestGenAgentImpl implements TestGenAgent {
     public TestGenResult generate(String interfaceDoc, String providerCode, int scenarioCount) {
         String traceId = "testgen-" + UUID.randomUUID().toString().substring(0, 8);
         String prompt = buildPrompt(interfaceDoc, providerCode, scenarioCount);
-        LlmRequest request = LlmRequest.of("deepseek", "deepseek-chat", prompt, traceId);
+        LlmRequest request = LlmRequest.of("qwen", "qwen-plus", prompt, traceId);
         LlmResponse response = llmGateway.chat(request);
         return buildResult(response.getContent());
     }

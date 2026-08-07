@@ -97,7 +97,7 @@ public class DiagnosisAgentImpl implements DiagnosisAgent {
                     instanceNo + ", error=" + error +
                     "。输出JSON: {\"root_cause\":\"\",\"cause_chain\":[],\"fix_suggestion\":\"\"}";
             String traceId = "diag-" + UUID.randomUUID().toString().substring(0, 8);
-            LlmRequest request = LlmRequest.of("deepseek", "deepseek-chat", prompt, traceId);
+            LlmRequest request = LlmRequest.of("qwen", "qwen-plus", prompt, traceId);
             String content = llmGateway.chat(request).getContent();
             // 简化: 解析 JSON 或使用 FakeProvider 默认值
             List<String> chain = new ArrayList<>();

@@ -22,11 +22,7 @@
             <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
         </dependency>
 
-        <!-- LangChain4j -->
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j</artifactId>
-        </dependency>
+<!-- LLM 调用使用 JDK 17 java.net.http.HttpClient，无额外框架依赖 -->
 
         <!-- MyBatis-Plus -->
         <dependency>

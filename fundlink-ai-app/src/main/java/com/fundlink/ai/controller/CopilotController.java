@@ -38,12 +38,14 @@ public class CopilotController {
                 req.getDocumentText(), req.getProviderCode());
 
         List<Map<String, Object>> mappings = result.getFieldMappings().stream()
-                .map(m -> Map.of(
-                        "fundField", m.getFundField(),
-                        "sourcePath", m.getSourcePath(),
-                        "transform", m.getTransform() != null ? m.getTransform() : "",
-                        "confidence", m.getConfidence()
-                )).toList();
+                .<Map<String, Object>>map(m -> {
+                    java.util.HashMap<String, Object> map = new java.util.HashMap<>();
+                    map.put("fundField", m.getFundField());
+                    map.put("sourcePath", m.getSourcePath());
+                    map.put("transform", m.getTransform() != null ? m.getTransform() : "");
+                    map.put("confidence", m.getConfidence());
+                    return map;
+                }).toList();
 
         return ApiAiResponse.success(mappings);
     }

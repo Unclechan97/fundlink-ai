@@ -42,16 +42,16 @@ fundlink:
       fallback-chain: deepseek,claude,qwen
       retry-max: 2
 
-# RAG 服务地址
-fundlink:
+  # RAG 服务地址
   rag:
     base-url: http://localhost:8000
-
-# FundLink 服务地址（调现有 API 写入配置）
-fundlink:
+  # FundLink 服务地址（调现有 API 写入配置）
   admin:
     base-url: http://localhost:8080
 
 logging:
   level:
     com.fundlink.ai: DEBUG
+    com.fundlink.ai.gateway: DEBUG
+    com.fundlink.ai.agent: DEBUG
+    dev.langchain4j: DEBUG

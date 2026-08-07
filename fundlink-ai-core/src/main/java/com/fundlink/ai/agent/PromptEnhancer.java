@@ -29,7 +29,9 @@ public class PromptEnhancer {
      * @return 增强后的 Prompt（包含 Few-shot 示例）
      */
     public String enhance(String basePrompt, String query) {
+        log.info("[ENHANCER] Searching RAG for few-shot  query={}", query);
         List<String> examples = searchRag(query);
+        log.info("[ENHANCER] RAG returned {} examples", examples.size());
         if (examples.isEmpty()) {
             return basePrompt;
         }

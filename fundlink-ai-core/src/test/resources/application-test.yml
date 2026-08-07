@@ -1,4 +1,6 @@
 spring:
+  main:
+    allow-bean-definition-overriding: true
   datasource:
     url: jdbc:h2:mem:fundlink_ai_test;MODE=MySQL;DB_CLOSE_DELAY=-1
     username: sa

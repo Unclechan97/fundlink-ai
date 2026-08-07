@@ -29,14 +29,21 @@ public class LlmGatewayImpl implements LlmGateway {
     public LlmResponse chat(LlmRequest request) {
         String providerName = request.getProvider() != null
                 ? request.getProvider().toLowerCase()
-                : "deepseek";
+                : "qwen";
+
+        log.info("[GATEWAY] Route request  traceId={}  provider={}  model={}  promptLen={}",
+                request.getTraceId(), providerName, request.getModel(),
+                request.getPrompt().length());
 
         LlmProvider provider = providers.get(providerName);
         if (provider == null) {
+            log.error("[GATEWAY] Provider not found: {}  available={}", providerName, providers.keySet());
             throw new IllegalArgumentException(
                     "Provider not found: " + providerName +
                     ". Available: " + providers.keySet());
         }
+
+        log.info("[GATEWAY] Provider selected: {}  totalProviders={}", providerName, providers.size());
 
         long startTime = System.currentTimeMillis();
         boolean success = true;
@@ -45,11 +52,20 @@ public class LlmGatewayImpl implements LlmGateway {
 
         try {
             response = provider.chat(request);
+            String content = response.getContent();
+            log.info("[GATEWAY] Response received  traceId={}  contentLen={}  tokensIn={}  tokensOut={}",
+                    request.getTraceId(), content.length(),
+                    response.getTokenUsage().getInputTokens(),
+                    response.getTokenUsage().getOutputTokens());
+            log.debug("[GATEWAY] Response content  traceId={}\n{}",
+                    request.getTraceId(), content.length() > 2000
+                            ? content.substring(0, 2000) + "...(truncated)" : content);
             return response;
         } catch (Exception e) {
             success = false;
             errorMsg = e.getMessage();
-            log.error("LLM call failed: provider={}, error={}", providerName, e.getMessage());
+            log.error("[GATEWAY] Call FAILED  provider={}  traceId={}  error={}",
+                    providerName, request.getTraceId(), e.getMessage());
             throw new RuntimeException("LLM call failed: " + e.getMessage(), e);
         } finally {
             long latency = System.currentTimeMillis() - startTime;

@@ -27,12 +27,26 @@ public class RequirementAgentImpl implements RequirementAgent {
     @Override
     public RequirementResult analyze(String documentText, String providerCode) {
         String traceId = "req-" + UUID.randomUUID().toString().substring(0, 8);
+        log.info("[REQ-AGENT] Start analyzing  traceId={}  provider={}  docLen={}",
+                traceId, providerCode, documentText.length());
+
         String basePrompt = buildPrompt(documentText, providerCode);
-        // Few-shot 增强: 从 RAG 检索相关案例注入 Prompt
+        log.info("[REQ-AGENT] Prompt built  traceId={}  basePromptLen={}", traceId, basePrompt.length());
+
         String prompt = enhancer.enhance(basePrompt, "字段映射 " + providerCode);
-        LlmRequest request = LlmRequest.of("deepseek", "deepseek-chat", prompt, traceId);
+        log.info("[REQ-AGENT] Few-shot enhanced  traceId={}  finalPromptLen={}", traceId, prompt.length());
+
+        LlmRequest request = LlmRequest.of("qwen", "qwen-plus", prompt, traceId);
         LlmResponse response = llmGateway.chat(request);
-        return parseResponse(response.getContent());
+
+        RequirementResult result = parseResponse(response.getContent());
+        log.info("[REQ-AGENT] Analysis done  traceId={}  mappings={}  flowNodes={}  schemaFields={}",
+                traceId,
+                result.getFieldMappings().size(),
+                result.getFlowDsl() != null ? result.getFlowDsl().getNodes().size() : 0,
+                result.getInterfaceSchema() != null && result.getInterfaceSchema().getFields() != null
+                        ? result.getInterfaceSchema().getFields().size() : 0);
+        return result;
     }
 
     private String buildPrompt(String doc, String code) {
