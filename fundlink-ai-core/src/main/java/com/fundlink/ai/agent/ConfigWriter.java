@@ -135,6 +135,28 @@ public class ConfigWriter {
             }
         }
 
+        // CONDITION 节点: 把 config.conditionExpr 移到出边上
+        for (FlowNode node : dsl.getNodes()) {
+            if ("CONDITION".equals(node.getType()) && node.getData() != null) {
+                Map<String, Object> config = (Map<String, Object>) node.getData().get("config");
+                String expr = config != null ? (String) config.remove("conditionExpr") : null;
+                if (expr != null) {
+                    List<FlowEdge> condEdges = new ArrayList<>();
+                    for (FlowEdge e : dsl.getEdges()) {
+                        if (node.getId().equals(e.getSource())) condEdges.add(e);
+                    }
+                    if (!condEdges.isEmpty()) {
+                        condEdges.get(0).setLabel("满足条件");
+                        condEdges.get(0).setConditionExpr(expr);
+                        // 第二条边(如果有)设为 else
+                        if (condEdges.size() > 1) {
+                            condEdges.get(1).setLabel("否则");
+                        }
+                    }
+                }
+            }
+        }
+
         Map<String, Object> graphData = Map.of("nodes", dsl.getNodes(), "edges", dsl.getEdges());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("flowCode", "AI_" + providerCode + "_" + flowType);

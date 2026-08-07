@@ -165,6 +165,8 @@ public class RequirementAgentImpl implements RequirementAgent {
                         fe.setId(e.path("id").asText(null));
                         fe.setSource(e.path("source").asText(null));
                         fe.setTarget(e.path("target").asText(null));
+                        fe.setLabel(e.path("label").asText(null));
+                        fe.setConditionExpr(e.path("conditionExpr").asText(null));
                         edges.add(fe);
                     }
                     fd.setEdges(edges);
