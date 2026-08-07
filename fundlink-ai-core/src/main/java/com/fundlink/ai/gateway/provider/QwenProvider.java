@@ -73,7 +73,7 @@ public class QwenProvider implements LlmProvider {
             log.info("[LLM] <<< Qwen done  traceId={}  latency={}ms  tokens={}/{}.  contentLen={}",
                     request.getTraceId(), elapsed, in, out, content.length());
             log.debug("[LLM] <<< Qwen content  traceId={}\n{}",
-                    request.getTraceId(), content.length() > 2000 ? content.substring(0, 2000) + "...TRUNCATED" : content);
+                    request.getTraceId(), content);
 
             return LlmResponse.of(content, "qwen", "qwen-plus",
                     TokenUsage.of(in, out), elapsed);

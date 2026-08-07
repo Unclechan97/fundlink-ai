@@ -72,7 +72,9 @@ public class ConfigWriter {
         body.put("timeoutMs", 5000);
 
         Map<String, Object> resp = post("/api/admin/providers", body);
-        return ((Number) ((Map) resp.get("data")).get("id")).longValue();
+        Object data = resp.get("data");
+        if (data instanceof Map) return ((Number) ((Map) data).get("id")).longValue();
+        return ((Number) data).longValue();
     }
 
     private Long createTemplate(String freeMarker, String providerCode, Long providerId) throws Exception {
@@ -85,7 +87,9 @@ public class ConfigWriter {
         body.put("content", freeMarker != null ? freeMarker : "{}");
 
         Map<String, Object> resp = post("/api/admin/templates", body);
-        return ((Number) ((Map) resp.get("data")).get("id")).longValue();
+        Object data = resp.get("data");
+        if (data instanceof Map) return ((Number) ((Map) data).get("id")).longValue();
+        return ((Number) data).longValue();
     }
 
     private void createFieldMapping(Long templateId, FieldMappingSuggestion m, int sort) throws Exception {
@@ -123,9 +127,14 @@ public class ConfigWriter {
         body.put("graphData", json.writeValueAsString(graphData));
 
         Map<String, Object> resp = post("/api/admin/flows", body);
-        Object idObj = resp.get("data");
-        if (idObj instanceof Map) idObj = ((Map) idObj).get("id");
-        return ((Number) idObj).longValue();
+        Object data = resp.get("data");
+        if (data instanceof Number) return ((Number) data).longValue();
+        if (data instanceof Map) {
+            Object id = ((Map) data).get("id");
+            if (id instanceof Number) return ((Number) id).longValue();
+            return Long.parseLong(id.toString());
+        }
+        return 0L;
     }
 
     @SuppressWarnings("unchecked")

@@ -169,8 +169,7 @@ public class RequirementAgentImpl implements RequirementAgent {
             }
         } catch (Exception e) {
             log.error("[REQ-AGENT] Parse failed: {}", e.getMessage());
-            log.debug("[REQ-AGENT] Raw content (first 500):\n{}",
-                    content.length() > 500 ? content.substring(0, 500) : content);
+            log.debug("[REQ-AGENT] Raw content:\n{}", content);
         }
         return result;
     }

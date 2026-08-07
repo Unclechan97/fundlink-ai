@@ -58,8 +58,7 @@ public class LlmGatewayImpl implements LlmGateway {
                     response.getTokenUsage().getInputTokens(),
                     response.getTokenUsage().getOutputTokens());
             log.debug("[GATEWAY] Response content  traceId={}\n{}",
-                    request.getTraceId(), content.length() > 2000
-                            ? content.substring(0, 2000) + "...(truncated)" : content);
+                    request.getTraceId(), content);
             return response;
         } catch (Exception e) {
             success = false;
