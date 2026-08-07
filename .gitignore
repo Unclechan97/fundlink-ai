@@ -28,3 +28,4 @@ application-local.yml
 *.bin
 models/
 qdrant_data/
+/FundLink AI构想 .md
