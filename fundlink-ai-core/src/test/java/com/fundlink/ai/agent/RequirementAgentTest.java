@@ -75,14 +75,6 @@ class RequirementAgentTest {
     }
 
     @Test
-    void shouldParseFreeMarkerTemplate() {
-        RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK");
-
-        assertThat(result.getFreeMarkerTemplate()).isNotBlank();
-        assertThat(result.getFreeMarkerTemplate()).contains("loanNo");
-    }
-
-    @Test
     void shouldParseProviderConfig() {
         RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK");
 

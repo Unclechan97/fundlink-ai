@@ -102,7 +102,6 @@ public class PromptBuilder {
   "field_mappings": [
     {"fund_field":"custName","source_path":"userInfo.realName","transform":"formatAmount","confidence":0.95}
   ],
-  "free_marker_template": "{ \\"header\\":{...}, \\"body\\":{...} }",
   "flow_dsl": {
     "nodes":[
       {"id":"n1","type":"START","data":{"label":"开始"}},
@@ -132,11 +131,6 @@ public class PromptBuilder {
 - 大部分字段transform为null,表示直接透传
 - confidence: 精确匹配=0.95, 语义推断=0.85, 模糊=0.70
 - fund_field必须来自接口文档字段名
-
-### free_marker_template
-- 生成完整的FreeMarker模板,包含请求头(如果有)和请求体
-- 变量名与field_mappings中的fund_field一一对应, 如 ${custName} ${applyAmount}
-- 金额字段用${formatAmount(applyAmount)}, 日期用${nowDate()}, 其他直接${字段名}
 
 ### flow_dsl
 - 条件分支示例(注意conditionExpr在出边上,不在节点上):

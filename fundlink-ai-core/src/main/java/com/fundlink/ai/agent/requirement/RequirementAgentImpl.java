@@ -95,12 +95,6 @@ public class RequirementAgentImpl implements RequirementAgent {
                 result.setProviderConfig(cfg);
             }
 
-            // free_marker_template
-            JsonNode fmt = root.path("free_marker_template");
-            if (!fmt.isMissingNode() && fmt.isTextual()) {
-                result.setFreeMarkerTemplate(fmt.asText());
-            }
-
             // interface_schema
             JsonNode schema = root.path("interface_schema");
             if (!schema.isMissingNode()) {

@@ -88,11 +88,12 @@ public class ConfigWriter {
             FieldMappingSuggestion m = valid.get(i);
             String name = m.getFundField();
             String comma = (i < valid.size() - 1) ? "," : "";
+            String sp = m.getSourcePath() != null ? m.getSourcePath() : name;
             String tf = m.getTransform();
             if (tf != null && !tf.isBlank()) {
-                content.append("  \"").append(name).append("\": \"${").append(tf).append("(").append(name).append(")}\"").append(comma).append("\n");
+                content.append("  \"").append(name).append("\": \"${").append(tf).append("(").append(sp).append(")}\"").append(comma).append("\n");
             } else {
-                content.append("  \"").append(name).append("\": \"${").append(name).append("}\"").append(comma).append("\n");
+                content.append("  \"").append(name).append("\": \"${").append(sp).append("}\"").append(comma).append("\n");
             }
         }
         content.append("}");

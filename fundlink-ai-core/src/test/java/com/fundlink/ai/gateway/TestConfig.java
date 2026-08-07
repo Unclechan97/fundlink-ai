@@ -36,7 +36,6 @@ public class TestConfig {
                         {"fund_field":"customerId","source_path":"userInfo.idNo","transform":null,"confidence":0.70},
                         {"fund_field":"customerName","source_path":"userInfo.realName","transform":null,"confidence":0.95}
                       ],
-                      "free_marker_template": "{\\"header\\":{},\\"body\\":{\\"loanNo\\":\\"${loanNo}\\",\\"amount\\":\\"${formatAmount(amount)}\\"}}",
                       "flow_dsl": {
                         "nodes":[{"id":"n1","type":"START"},{"id":"n2","type":"DATA_COLLECT"},{"id":"n3","type":"TEMPLATE_RENDER"},{"id":"n4","type":"SEND_TO_FUND"},{"id":"n5","type":"END"}],
                         "edges":[{"id":"e1","source":"n1","target":"n2"},{"id":"e2","source":"n2","target":"n3"},{"id":"e3","source":"n3","target":"n4"},{"id":"e4","source":"n4","target":"n5"}]
