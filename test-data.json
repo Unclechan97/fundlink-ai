@@ -1,0 +1,22 @@
+{
+  "userInfo": {
+    "realName": "张三",
+    "idType": "01",
+    "idNo": "110101199001011234",
+    "mobile": "13800138000",
+    "annualIncome": 200000.00
+  },
+  "loanInfo": {
+    "amount": 100000.00,
+    "term": 12,
+    "rate": 5.6,
+    "rateType": "FIXED",
+    "repayMethod": "EQUAL_INSTALLMENT",
+    "loanPurpose": "CONSUMPTION"
+  },
+  "paymentData": {
+    "accountNo": "6222021234567890123",
+    "bankCode": "308584000013",
+    "bankName": "招商银行深圳分行"
+  }
+}
