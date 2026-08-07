@@ -1,0 +1,125 @@
+# DTO字段路径目录 — FundLink 与 AI 之间的数据契约
+# 修改 DTO 类时必须同步更新此文件 (CI 集成测试保证)
+
+loan:
+  userInfo:
+    - realName          # 姓名
+    - idType            # 证件类型 (内部枚举: 01身份证/02护照/03军官证)
+    - idNo              # 证件号码
+    - idValidFrom       # 证件有效期起
+    - idValidTo         # 证件有效期止
+    - gender            # 性别 (内部枚举: M男/F女)
+    - birthday          # 出生日期
+    - nationality       # 国籍
+    - mobile            # 手机号
+    - email             # 邮箱
+    - address           # 居住地址
+    - hukouAddress      # 户籍地址
+    - zipCode           # 邮编
+    - occupation        # 职业
+    - employerName      # 单位名称
+    - employerIndustry  # 单位行业
+    - employerPhone     # 单位电话
+    - workYears         # 工作年限(年)
+    - annualIncome      # 年收入(万元)
+    - education         # 学历 (内部枚举: HIGH_SCHOOL/BACHELOR/MASTER/PHD)
+    - maritalStatus     # 婚姻 (内部枚举: SINGLE/MARRIED/DIVORCED/WIDOWED)
+    - dependents        # 抚养人数
+    - creditLevel       # 内部信用等级
+    - creditScore       # 内部信用评分
+    - hasHouse          # 是否有房
+    - hasCar            # 是否有车
+  loanInfo:
+    - loanNo            # 借款编号
+    - productCode       # 产品编码
+    - productName       # 产品名称
+    - loanPurpose       # 借款用途 (内部枚举: CONSUMPTION/HOUSE/CAR/BUSINESS/EDUCATION)
+    - amount            # 借款金额
+    - term              # 借款期限(月)
+    - rate              # 年化利率(%)
+    - rateType          # 利率类型 (内部枚举: FIXED/FLOATING)
+    - repayMethod       # 还款方式 (内部枚举: EQUAL_INSTALLMENT/EQUAL_PRINCIPAL/BULLET)
+    - currency          # 币种
+    - applyDate         # 申请日期
+    - expectedLendDate  # 期望放款日
+    - serviceFee        # 服务费
+    - insuranceFee      # 保险费
+  riskData:
+    - score             # 综合评分(0-100)
+    - level             # 风控等级 (内部枚举: A/B/C/D)
+    - decision          # 风控决策 (内部枚举: PASS/REVIEW/REJECT)
+    - remarks           # 风控备注
+    - antiFraudScore    # 反欺诈评分
+    - creditReportScore # 征信评分
+    - incomeScore       # 收入评分
+    - identityScore     # 身份验证评分
+    - overdueCount      # 逾期次数
+    - maxOverdueAmt     # 最大逾期金额
+    - queryCount3m      # 近3月查询次数
+    - totalDebt         # 总负债
+    - monthlyPayment    # 月还款额
+    - debtRatio         # 负债率(%)
+  paymentData:
+    - accountNo         # 银行账号
+    - accountName       # 账户名
+    - bankCode          # 银行编码
+    - bankName          # 银行名称
+    - bankBranch        # 开户支行
+    - bankProvince      # 开户省份
+    - bankCity          # 开户城市
+    - cardType          # 卡类型 (内部枚举: DEBIT/CREDIT)
+    - status            # 账户状态 (内部枚举: NORMAL/FROZEN/CLOSED)
+    - availableBalance  # 可用余额
+    - frozenAmount      # 冻结金额
+    - bindMobile        # 预留手机号
+    - bindDate          # 绑卡日期
+
+credit:
+  userInfo:
+    - realName
+    - idType
+    - idNo
+    - gender
+    - birthday
+    - mobile
+    - email
+    - address
+    - occupation
+    - employerName
+    - annualIncome
+    - education
+    - maritalStatus
+    - creditScore
+    - hasHouse
+    - hasCar
+  riskData:
+    - score
+    - level
+    - decision
+    - antiFraudScore
+    - creditReportScore
+    - incomeScore
+    - overdueCount
+    - debtRatio
+    - totalDebt
+    - monthlyPayment
+
+repay:
+  userInfo:
+    - realName
+    - idType
+    - idNo
+    - mobile
+  loanInfo:
+    - loanNo
+    - amount
+    - term
+    - rate
+    - repayMethod
+    - currency
+  paymentData:
+    - accountNo
+    - accountName
+    - bankCode
+    - bankName
+    - availableBalance

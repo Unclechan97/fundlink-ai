@@ -30,7 +30,7 @@ public class PromptEnhancer {
      */
     public String enhance(String basePrompt, String query) {
         log.info("[ENHANCER] Searching RAG for few-shot  query={}", query);
-        List<String> examples = searchRag(query);
+        List<String> examples = search(query);
         log.info("[ENHANCER] RAG returned {} examples", examples.size());
         if (examples.isEmpty()) {
             return basePrompt;
@@ -51,7 +51,7 @@ public class PromptEnhancer {
     }
 
     @SuppressWarnings("unchecked")
-    private List<String> searchRag(String query) {
+    public List<String> search(String query) {
         List<String> results = new ArrayList<>();
         try {
             URI uri = new URI("http://localhost:8000/search");
