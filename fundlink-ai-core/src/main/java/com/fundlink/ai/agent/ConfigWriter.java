@@ -88,8 +88,9 @@ public class ConfigWriter {
             FieldMappingSuggestion m = valid.get(i);
             String name = m.getFundField();
             String comma = (i < valid.size() - 1) ? "," : "";
-            if ("formatAmount".equals(m.getTransform())) {
-                content.append("  \"").append(name).append("\": \"${formatAmount(").append(name).append(")}\"").append(comma).append("\n");
+            String tf = m.getTransform();
+            if (tf != null && !tf.isBlank()) {
+                content.append("  \"").append(name).append("\": \"${").append(tf).append("(").append(name).append(")}\"").append(comma).append("\n");
             } else {
                 content.append("  \"").append(name).append("\": \"${").append(name).append("}\"").append(comma).append("\n");
             }
