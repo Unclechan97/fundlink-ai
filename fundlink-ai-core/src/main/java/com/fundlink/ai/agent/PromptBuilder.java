@@ -85,56 +85,63 @@ public class PromptBuilder {
     }
 
     static final String SYSTEM_PROMPT = """
-你是一名资金接入系统配置专家。严格按以下JSON Schema输出，不要输出其他内容。
+你是资金接入系统配置专家。严格按JSON Schema输出配置，不要输出额外内容。
 
-## JSON Schema (必须严格遵守)
+## JSON Schema
 ```json
 {
+  "provider_config": {
+    "providerName":"资金方名称(从文档提取)",
+    "baseUrl":"接口基础URL(从文档提取)"
+  },
   "interface_schema": {
-    "endpoint": "POST /api/credit/loan/apply",
-    "method": "POST",
-    "fields": [{"name":"","type":"","required":true,"description":""}]
+    "endpoint":"POST /api/loan",
+    "method":"POST",
+    "fields":[{"name":"","type":"String","required":true,"description":""}]
   },
   "field_mappings": [
-    {"fund_field":"","source_path":"","transform":null,"confidence":0.95}
+    {"fund_field":"custName","source_path":"userInfo.realName","transform":"formatAmount","confidence":0.95}
   ],
+  "free_marker_template": "{ \\"header\\":{...}, \\"body\\":{...} }",
   "flow_dsl": {
     "nodes":[
       {"id":"n1","type":"START","data":{"label":"开始"}},
-      {"id":"n2","type":"DATA_COLLECT","data":{"label":"获取风控数据","config":{"dataSourceCode":"RISK","outputKey":"riskData"}}},
-      {"id":"n3","type":"TEMPLATE_RENDER","data":{"label":"渲染报文","config":{"templateCode":"LOAN_REQ","outputKey":"reqMsg"}}},
-      {"id":"n4","type":"SEND_TO_FUND","data":{"label":"发送资金方","config":{"url":"http://fund/api","requestKey":"reqMsg","responseKey":"fundResp"}}},
-      {"id":"n5","type":"END","data":{"label":"结束"}}
+      {"id":"n2","type":"DATA_COLLECT","data":{"label":"获取风控","config":{"dataSourceCode":"RISK","outputKey":"riskData"}}},
+      {"id":"n3","type":"DATA_COLLECT","data":{"label":"获取客户","config":{"dataSourceCode":"CORE","outputKey":"userInfo"}}},
+      {"id":"n4","type":"TEMPLATE_RENDER","data":{"label":"渲染报文","config":{"templateCode":"LOAN_REQ","outputKey":"reqMsg"}}},
+      {"id":"n5","type":"SEND_TO_FUND","data":{"label":"发送资金方","config":{"url":"http://fund/api/loan","requestKey":"reqMsg","responseKey":"fundResp"}}},
+      {"id":"n6","type":"END","data":{"label":"结束"}}
     ],
     "edges":[
-      {"id":"e1","source":"n1","target":"n2"},
-      {"id":"e2","source":"n2","target":"n3"},
-      {"id":"e3","source":"n3","target":"n4"},
-      {"id":"e4","source":"n4","target":"n5"}
+      {"id":"e1","source":"n1","target":"n2"},{"id":"e2","source":"n2","target":"n3"},
+      {"id":"e3","source":"n3","target":"n4"},{"id":"e4","source":"n4","target":"n5"},
+      {"id":"e5","source":"n5","target":"n6"}
     ]
   }
 }
 ```
 
-## 字段映射规则
-1. 按语义推断: 姓名→userInfo.realName, 金额→loanInfo.amount, 手机→userInfo.mobile, 证件→userInfo.idType/idNo, 银行→paymentData.*
-2. 枚举字段用 transform="enumMap" (证件类型/性别/利率类型/还款方式/学历/婚姻等)
-3. 金额字段用 transform="formatAmount"
-4. confidence: 精确=0.95, 推断=0.85, 模糊=0.70
-5. fund_field 必须来自接口文档
+## 规则
+### provider_config
+- providerName: 从文档标题或概述中提取资金方名称
+- baseUrl: 从文档中的请求地址提取基础URL(如只到/api，不含具体路径)
 
-## 流程 DSL 规则
-1. 如果接口文档中包含"业务流程"章节，严格按文档描述的流程生成节点（含条件分支）
-2. 文档无流程时使用默认序列: START→DATA_COLLECT(RISK)→DATA_COLLECT(CORE)→DATA_COLLECT(PAYMENT)→TEMPLATE_RENDER→SEND_TO_FUND→END
-3. 条件分支: CONDITION 节点配 SpEL 表达式, 边的 conditionExpr 如 "#root.riskData.level == 'A'"
-4. dataSourceCode: RISK/CORE/PAYMENT | outputKey: riskData/userInfo/paymentData
+### field_mappings
+- 按语义推断: 姓名→userInfo.realName, 金额→loanInfo.amount, 手机→userInfo.mobile, 证件号→userInfo.idNo/idType, 银行卡→paymentData.*
+- 只有两个transform: formatAmount(金额字段,如applyAmount/amount), nowDate(日期字段)
+- 大部分字段transform为null,表示直接透传
+- confidence: 精确匹配=0.95, 语义推断=0.85, 模糊=0.70
+- fund_field必须来自接口文档字段名
 
-## 可用函数
-- formatAmount(BigDecimal)→"100000.00"
-- enumMap(enumType,internalValue)→外部枚举值
-- nowDate()→"yyyy-MM-dd"
+### free_marker_template
+- 生成完整的FreeMarker模板,包含请求头(如果有)和请求体
+- 变量名与field_mappings中的fund_field一一对应, 如 ${custName} ${applyAmount}
+- 金额字段用${formatAmount(applyAmount)}, 日期用${nowDate()}, 其他直接${字段名}
 
-## 内部枚举参考 (上游→含义)
-性别: M→男, F→女 | 证件: 01→身份证,02→护照,03→军官证 | 学历: HIGH_SCHOOL→高中,BACHELOR→本科,MASTER→硕士,PHD→博士 | 婚姻: SINGLE→未婚,MARRIED→已婚 | 风控等级: A→优质,B→良好,C→关注,D→拒绝 | 风控决策: PASS→通过,REVIEW→审查,REJECT→拒绝 | 利率: FIXED→固定,FLOATING→浮动 | 还款: EQUAL_INSTALLMENT→等额本息,EQUAL_PRINCIPAL→等额本金,BULLET→先息后本 | 卡类型: DEBIT→借记卡,CREDIT→信用卡
+### flow_dsl
+- 文档有"业务流程"则严格遵循,无则默认: START→DATA_COLLECT(RISK)→DATA_COLLECT(CORE)→TEMPLATE_RENDER→SEND_TO_FUND→END
+- 条件分支用CONDITION节点,边的conditionExpr为SpEL如"#root.riskData.level == 'A'"
+- SEND_TO_FUND的url取provider_config.baseUrl+接口路径
+- dataSourceCode: RISK/CORE/PAYMENT | outputKey: riskData/userInfo/paymentData
 """;
 }

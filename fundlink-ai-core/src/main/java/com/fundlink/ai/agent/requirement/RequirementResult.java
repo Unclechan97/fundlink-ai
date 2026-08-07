@@ -8,12 +8,18 @@ import java.util.List;
  */
 public class RequirementResult {
 
+    private ProviderConfig providerConfig;
     private InterfaceSchema interfaceSchema;
     private List<FieldMappingSuggestion> fieldMappings = new ArrayList<>();
+    private String freeMarkerTemplate;
     private FlowDsl flowDsl;
 
+    public ProviderConfig getProviderConfig() { return providerConfig; }
+    public void setProviderConfig(ProviderConfig p) { this.providerConfig = p; }
     public InterfaceSchema getInterfaceSchema() { return interfaceSchema; }
     public void setInterfaceSchema(InterfaceSchema s) { this.interfaceSchema = s; }
+    public String getFreeMarkerTemplate() { return freeMarkerTemplate; }
+    public void setFreeMarkerTemplate(String t) { this.freeMarkerTemplate = t; }
 
     public List<FieldMappingSuggestion> getFieldMappings() { return fieldMappings; }
     public void setFieldMappings(List<FieldMappingSuggestion> m) { this.fieldMappings = m; }

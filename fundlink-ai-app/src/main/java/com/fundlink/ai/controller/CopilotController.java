@@ -1,5 +1,6 @@
 package com.fundlink.ai.controller;
 
+import com.fundlink.ai.agent.ConfigWriter;
 import com.fundlink.ai.agent.requirement.FieldMappingSuggestion;
 import com.fundlink.ai.agent.requirement.RequirementAgent;
 import com.fundlink.ai.agent.requirement.RequirementResult;
@@ -17,6 +18,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class CopilotController {
 
+    private final ConfigWriter configWriter;
     private final RequirementAgent requirementAgent;
 
     /**
@@ -27,6 +29,17 @@ public class CopilotController {
         RequirementResult result = requirementAgent.analyze(
                 req.getDocumentText(), req.getProviderCode());
         return ApiAiResponse.success(result);
+    }
+
+    /**
+     * 审核通过后一键写入 FundLink
+     */
+    @PostMapping("/apply")
+    public ApiAiResponse<ConfigWriter.WriteResult> apply(@RequestBody ApplyRequest req) {
+        RequirementResult result = req.getResult();
+        ConfigWriter.WriteResult write = configWriter.writeAll(
+                result, req.getProviderCode(), req.getFlowType());
+        return ApiAiResponse.success(write);
     }
 
     /**
@@ -60,6 +73,19 @@ public class CopilotController {
         public void setDocumentText(String d) { this.documentText = d; }
         public String getProviderCode() { return providerCode; }
         public void setProviderCode(String p) { this.providerCode = p; }
+    }
+
+    public static class ApplyRequest {
+        private RequirementResult result;
+        private String providerCode;
+        private String flowType = "LOAN";
+
+        public RequirementResult getResult() { return result; }
+        public void setResult(RequirementResult r) { this.result = r; }
+        public String getProviderCode() { return providerCode; }
+        public void setProviderCode(String p) { this.providerCode = p; }
+        public String getFlowType() { return flowType; }
+        public void setFlowType(String f) { this.flowType = f; }
     }
 
     public static class ApiAiResponse<T> {

@@ -86,6 +86,21 @@ public class RequirementAgentImpl implements RequirementAgent {
 
             JsonNode root = json.readTree(raw);
 
+            // provider_config
+            JsonNode pc = root.path("provider_config");
+            if (!pc.isMissingNode()) {
+                var cfg = new ProviderConfig();
+                cfg.setProviderName(pc.path("providerName").asText(null));
+                cfg.setBaseUrl(pc.path("baseUrl").asText(null));
+                result.setProviderConfig(cfg);
+            }
+
+            // free_marker_template
+            JsonNode fmt = root.path("free_marker_template");
+            if (!fmt.isMissingNode() && fmt.isTextual()) {
+                result.setFreeMarkerTemplate(fmt.asText());
+            }
+
             // interface_schema
             JsonNode schema = root.path("interface_schema");
             if (!schema.isMissingNode()) {

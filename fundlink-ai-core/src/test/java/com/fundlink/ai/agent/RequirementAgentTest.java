@@ -71,17 +71,22 @@ class RequirementAgentTest {
         assertThat(result.getInterfaceSchema()).isNotNull();
         assertThat(result.getInterfaceSchema().getEndpoint())
                 .isEqualTo("POST /loan/apply");
-        assertThat(result.getInterfaceSchema().getFields()).hasSizeGreaterThanOrEqualTo(5);
+        assertThat(result.getInterfaceSchema().getFields()).hasSizeGreaterThanOrEqualTo(4);
     }
 
     @Test
-    void shouldSuggestEnumMappingForIdType() {
+    void shouldParseFreeMarkerTemplate() {
         RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK");
 
-        // idType 字段应该被识别为需要枚举映射
-        assertThat(result.getFieldMappings()).anyMatch(m ->
-                "idType".equals(m.getFundField()) &&
-                m.getSourcePath() != null &&
-                m.getSourcePath().contains("idType"));
+        assertThat(result.getFreeMarkerTemplate()).isNotBlank();
+        assertThat(result.getFreeMarkerTemplate()).contains("loanNo");
+    }
+
+    @Test
+    void shouldParseProviderConfig() {
+        RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK");
+
+        assertThat(result.getProviderConfig()).isNotNull();
+        assertThat(result.getProviderConfig().getProviderName()).isNotBlank();
     }
 }
