@@ -139,8 +139,11 @@ public class PromptBuilder {
 - 金额字段用${formatAmount(applyAmount)}, 日期用${nowDate()}, 其他直接${字段名}
 
 ### flow_dsl
-- 文档有"业务流程"则严格遵循,无则默认: START→DATA_COLLECT(RISK)→DATA_COLLECT(CORE)→TEMPLATE_RENDER→SEND_TO_FUND→END
-- 条件分支用CONDITION节点,边的conditionExpr为SpEL如"#root.riskData.level == 'A'"
+- 条件分支示例(注意conditionExpr在出边上,不在节点上):
+  CONDITION节点: {"id":"nc","type":"CONDITION","data":{"label":"风控判断"}}
+  出边1(满足条件): {"id":"ec1","source":"nc","target":"n_ok","label":"A级","conditionExpr":"#root.riskData.level == 'A'"}
+  出边2(否则): {"id":"ec2","source":"nc","target":"n_review","label":"非A级"}
+- 文档有"业务流程"则严格遵循,无则默认: START→DATA_COLLECT→TEMPLATE_RENDER→SEND_TO_FUND→END
 - SEND_TO_FUND的url取provider_config.baseUrl+接口路径
 - dataSourceCode: RISK/CORE/PAYMENT | outputKey: riskData/userInfo/paymentData
 """;

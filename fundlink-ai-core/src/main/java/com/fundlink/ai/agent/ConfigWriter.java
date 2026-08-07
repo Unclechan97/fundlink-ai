@@ -103,9 +103,26 @@ public class ConfigWriter {
 
     private Long createFlow(FlowDsl dsl, ProviderConfig cfg, String providerCode, String flowType, Long providerId)
             throws Exception {
-        // 补充 SEND_TO_FUND 节点的 url
+        // 为所有节点补默认值
         for (FlowNode node : dsl.getNodes()) {
-            if ("SEND_TO_FUND".equals(node.getType()) && node.getData() != null) {
+            Map<String, Object> data = node.getData();
+            if (data == null) data = new LinkedHashMap<>();
+            // 补默认 label
+            if (!data.containsKey("label")) {
+                data.put("label", switch (node.getType()) {
+                    case "START" -> "开始";
+                    case "END" -> "结束";
+                    case "DATA_COLLECT" -> "获取数据";
+                    case "TEMPLATE_RENDER" -> "渲染报文";
+                    case "SEND_TO_FUND" -> "发送资金方";
+                    case "CONDITION" -> "条件判断";
+                    default -> "步骤";
+                });
+            }
+            node.setData(data);
+
+            // 补充 SEND_TO_FUND 节点的 url
+            if ("SEND_TO_FUND".equals(node.getType())) {
                 Map<String, Object> config = (Map<String, Object>) node.getData().get("config");
                 if (config == null) {
                     config = new LinkedHashMap<>();

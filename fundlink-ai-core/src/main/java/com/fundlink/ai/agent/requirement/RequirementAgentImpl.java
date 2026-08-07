@@ -149,6 +149,10 @@ public class RequirementAgentImpl implements RequirementAgent {
                         var fn = new FlowNode();
                         fn.setId(n.path("id").asText(null));
                         fn.setType(n.path("type").asText(null));
+                        // 保留 data 字段 (label + config)
+                        if (!n.path("data").isMissingNode()) {
+                            fn.setData(json.convertValue(n.path("data"), Map.class));
+                        }
                         nodes.add(fn);
                     }
                     fd.setNodes(nodes);
