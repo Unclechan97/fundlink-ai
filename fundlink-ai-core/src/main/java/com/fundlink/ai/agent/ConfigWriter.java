@@ -191,7 +191,8 @@ public class ConfigWriter {
             return existing;
         }
 
-        enrichFlowDsl(dsl, cfg);
+        String templateCode = "AI_" + code;
+        enrichFlowDsl(dsl, cfg, templateCode);
         Map<String, Object> graphData = Map.of("nodes", dsl.getNodes(), "edges",
                 dsl.getEdges() != null ? dsl.getEdges() : Collections.emptyList());
         Map<String, Object> body = new LinkedHashMap<>();
@@ -215,7 +216,7 @@ public class ConfigWriter {
         return null;
     }
 
-    private void enrichFlowDsl(FlowDsl dsl, ProviderConfig cfg) {
+    private void enrichFlowDsl(FlowDsl dsl, ProviderConfig cfg, String templateCode) {
         for (FlowNode node : dsl.getNodes()) {
             Map<String, Object> data = node.getData();
             if (data == null) data = new LinkedHashMap<>();
@@ -228,6 +229,15 @@ public class ConfigWriter {
                 });
             }
             node.setData(data);
+
+            // Fix templateCode — LLM outputs placeholder "LOAN_REQ", real code is "AI_{providerCode}"
+            if ("TEMPLATE_RENDER".equals(node.getType())) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> config = (Map<String, Object>) data.get("config");
+                if (config == null) { config = new LinkedHashMap<>(); data.put("config", config); }
+                config.put("templateCode", templateCode);
+                log.info("[WRITE] TEMPLATE_RENDER templateCode fixed: {} → {}", config.get("templateCode"), templateCode);
+            }
 
             if ("SEND_TO_FUND".equals(node.getType())) {
                 @SuppressWarnings("unchecked")
