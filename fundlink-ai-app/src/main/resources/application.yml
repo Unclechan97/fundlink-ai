@@ -44,8 +44,8 @@ fundlink:
         output-price: 0.008
     # 路由策略
     router:
-      default-provider: deepseek
-      fallback-chain: deepseek,claude,qwen
+      default-provider: qwen
+      fallback-chain: qwen,deepseek
       retry-max: 2
 
   # RAG 服务地址

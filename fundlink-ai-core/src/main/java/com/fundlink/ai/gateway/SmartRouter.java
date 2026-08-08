@@ -17,19 +17,19 @@ public class SmartRouter {
     public ModelSelection select(String taskType) {
         return switch (taskType != null ? taskType : "default") {
             case "simple", "classification" -> {
-                // 简单分类/意图识别 → DeepSeek (最便宜)
-                yield new ModelSelection("deepseek", "deepseek-chat", 0.00015, 0.0006);
+                // 简单任务 → Qwen
+                yield new ModelSelection("qwen", "qwen-plus", 0.002, 0.008);
             }
             case "requirement", "testgen" -> {
-                // 配置生成 → DeepSeek (性价比高)
-                yield new ModelSelection("deepseek", "deepseek-chat", 0.00015, 0.0006);
+                // 配置生成 → Qwen (体验额度)
+                yield new ModelSelection("qwen", "qwen-plus", 0.002, 0.008);
             }
             case "diagnosis", "complex" -> {
                 // 复杂诊断 → Claude (推理能力强)
                 yield new ModelSelection("claude", "claude-haiku-4-5-20251001", 0.001, 0.005);
             }
             default -> {
-                yield new ModelSelection("deepseek", "deepseek-chat", 0.00015, 0.0006);
+                yield new ModelSelection("qwen", "qwen-plus", 0.002, 0.008);
             }
         };
     }
