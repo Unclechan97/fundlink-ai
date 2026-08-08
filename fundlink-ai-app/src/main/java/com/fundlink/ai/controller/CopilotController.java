@@ -28,6 +28,9 @@ public class CopilotController {
     public ApiAiResponse<RequirementResult> analyze(@RequestBody AnalyzeRequest req) {
         RequirementResult result = requirementAgent.analyze(
                 req.getDocumentText(), req.getProviderCode());
+        if (result.getParseError() != null) {
+            return ApiAiResponse.error("AI 解析异常: " + result.getParseError(), result);
+        }
         return ApiAiResponse.success(result);
     }
 
@@ -97,6 +100,14 @@ public class CopilotController {
             ApiAiResponse<T> r = new ApiAiResponse<>();
             r.code = 0;
             r.msg = "ok";
+            r.data = data;
+            return r;
+        }
+
+        public static <T> ApiAiResponse<T> error(String msg, T data) {
+            ApiAiResponse<T> r = new ApiAiResponse<>();
+            r.code = -1;
+            r.msg = msg;
             r.data = data;
             return r;
         }

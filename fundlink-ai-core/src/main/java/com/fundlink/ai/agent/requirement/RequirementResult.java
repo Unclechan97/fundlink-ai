@@ -12,6 +12,7 @@ public class RequirementResult {
     private InterfaceSchema interfaceSchema;
     private List<FieldMappingSuggestion> fieldMappings = new ArrayList<>();
     private FlowDsl flowDsl;
+    private String parseError;
 
     public ProviderConfig getProviderConfig() { return providerConfig; }
     public void setProviderConfig(ProviderConfig p) { this.providerConfig = p; }
@@ -23,4 +24,7 @@ public class RequirementResult {
 
     public FlowDsl getFlowDsl() { return flowDsl; }
     public void setFlowDsl(FlowDsl f) { this.flowDsl = f; }
+
+    public String getParseError() { return parseError; }
+    public void setParseError(String parseError) { this.parseError = parseError; }
 }

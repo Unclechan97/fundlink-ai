@@ -28,14 +28,20 @@ fundlink:
         base-url: https://api.deepseek.com/v1
         api-key: ${DEEPSEEK_API_KEY:}
         default-model: deepseek-chat
+        input-price: 0.00015    # USD/1K tokens (deepseek-chat)
+        output-price: 0.0006
       claude:
         base-url: https://api.anthropic.com/v1
         api-key: ${ANTHROPIC_API_KEY:}
         default-model: claude-haiku-4-5-20251001
+        input-price: 0.0008     # USD/1K tokens (claude-haiku)
+        output-price: 0.004
       qwen:
         base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
         api-key: ${QWEN_API_KEY:}
         default-model: qwen-plus
+        input-price: 0.002      # USD/1K tokens (qwen-plus)
+        output-price: 0.008
     # 路由策略
     router:
       default-provider: deepseek
@@ -54,4 +60,3 @@ logging:
     com.fundlink.ai: DEBUG
     com.fundlink.ai.gateway: DEBUG
     com.fundlink.ai.agent: DEBUG
-    dev.langchain4j: DEBUG

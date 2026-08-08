@@ -9,8 +9,8 @@ public class LlmRequest {
     private String model;
     private String systemPrompt;
     private String prompt;
-    private double temperature = 0.3;
-    private int maxTokens = 4096;
+    private Double temperature;
+    private Integer maxTokens;
     private String taskType;  // simple/requirement/testgen/diagnosis/complex
     private String traceId;
 
@@ -27,7 +27,7 @@ public class LlmRequest {
     public String getModel() { return model; }
     public String getSystemPrompt() { return systemPrompt; }
     public String getPrompt() { return prompt; }
-    public double getTemperature() { return temperature; }
-    public int getMaxTokens() { return maxTokens; }
+    public Double getTemperature() { return temperature; }
+    public Integer getMaxTokens() { return maxTokens; }
     public String getTraceId() { return traceId; }
 }

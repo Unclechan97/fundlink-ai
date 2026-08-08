@@ -1,16 +1,23 @@
 package com.fundlink.ai.gateway;
 
-import com.fundlink.ai.gateway.provider.QwenProvider;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.task.SyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.annotation.EnableAsync;
 
 @EnableAsync
 @SpringBootApplication(scanBasePackages = "com.fundlink.ai")
 @MapperScan("com.fundlink.ai.mapper")
 public class TestConfig {
+
+    /** Test: @Async runs synchronously so assertions don't race */
+    @Bean
+    public TaskExecutor taskExecutor() {
+        return new SyncTaskExecutor();
+    }
 
     /** 测试用 Fake Provider — 替代真实 QwenProvider */
     @Primary

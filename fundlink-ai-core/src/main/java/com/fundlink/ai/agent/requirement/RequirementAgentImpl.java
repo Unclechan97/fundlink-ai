@@ -49,10 +49,15 @@ public class RequirementAgentImpl implements RequirementAgent {
         // 4. 安全解析
         RequirementResult result = parseSafely(response.getContent());
 
-        log.info("[REQ-AGENT] Done  traceId={}  mappings={}  flowNodes={}  schemaFields={}",
-                traceId,
-                result.getFieldMappings() != null ? result.getFieldMappings().size() : 0,
-                countNodes(result), countFields(result));
+        if (result.getParseError() != null) {
+            log.error("[REQ-AGENT] Analysis completed with parse error  traceId={}  error={}",
+                    traceId, result.getParseError());
+        } else {
+            log.info("[REQ-AGENT] Done  traceId={}  mappings={}  flowNodes={}  schemaFields={}",
+                    traceId,
+                    result.getFieldMappings() != null ? result.getFieldMappings().size() : 0,
+                    countNodes(result), countFields(result));
+        }
         return result;
     }
 
@@ -66,10 +71,16 @@ public class RequirementAgentImpl implements RequirementAgent {
         return (s != null && s.getFields() != null) ? s.getFields().size() : 0;
     }
 
-    /** 使用 JsonNode 安全解析，字段缺失不抛异常 */
+    /** 使用 JsonNode 安全解析，字段缺失不抛异常。JSON 完全不可解析时设置 parseError */
     private RequirementResult parseSafely(String content) {
         RequirementResult result = new RequirementResult();
         result.setFieldMappings(new ArrayList<>());
+
+        if (content == null || content.isBlank()) {
+            result.setParseError("LLM returned empty response");
+            log.error("[REQ-AGENT] Parse failed: empty response from LLM");
+            return result;
+        }
 
         try {
             // 提取 JSON 块
@@ -123,11 +134,29 @@ public class RequirementAgentImpl implements RequirementAgent {
                 List<FieldMappingSuggestion> list = new ArrayList<>();
                 for (JsonNode m : mappings) {
                     var fm = new FieldMappingSuggestion();
-                    fm.setFundField(m.path("fund_field").asText(null));
-                    fm.setSourcePath(m.path("source_path").asText(null));
+                    String fundField = m.path("fund_field").asText(null);
+                    String sourcePath = m.path("source_path").asText(null);
+                    fm.setFundField(fundField);
+                    fm.setSourcePath(sourcePath);
                     fm.setTransform(m.path("transform").asText(null));
                     fm.setConfidence(m.path("confidence").asDouble(0.8));
-                    if (fm.getFundField() != null) list.add(fm);
+                    // 跳过无效映射
+                    if (fundField == null || sourcePath == null) {
+                        log.warn("[REQ-AGENT] Skipping mapping with null field: fundField={} sourcePath={}",
+                                fundField, sourcePath);
+                        continue;
+                    }
+                    // 检测 sourcePath 截断 (project_status 6.7)
+                    if (!sourcePath.contains(".") && !sourcePath.matches("^[a-zA-Z]+$")) {
+                        log.warn("[REQ-AGENT] Suspected truncated sourcePath: '{}' (fundField={})",
+                                sourcePath, fundField);
+                    }
+                    // 校验 sourcePath 仅含合法字符
+                    if (!sourcePath.matches("^[a-zA-Z][a-zA-Z0-9]*(\\.[a-zA-Z][a-zA-Z0-9]*)*$")) {
+                        log.warn("[REQ-AGENT] Invalid sourcePath format: '{}' (fundField={})",
+                                sourcePath, fundField);
+                    }
+                    list.add(fm);
                 }
                 result.setFieldMappings(list);
             }
@@ -170,6 +199,7 @@ public class RequirementAgentImpl implements RequirementAgent {
         } catch (Exception e) {
             log.error("[REQ-AGENT] Parse failed: {}", e.getMessage());
             log.debug("[REQ-AGENT] Raw content:\n{}", content);
+            result.setParseError("LLM response parse failed: " + e.getMessage());
         }
         return result;
     }
