@@ -26,26 +26,30 @@ public class ConfigWriter {
     public WriteResult writeAll(RequirementResult result, String providerCode, String flowType) {
         WriteResult r = new WriteResult();
         try {
-            Long providerId = createProvider(result.getProviderConfig(), providerCode);
+            Long providerId = getOrCreateProvider(result.getProviderConfig(), providerCode);
             r.setProviderId(providerId);
             log.info("[WRITE] Provider id={}", providerId);
 
-            Long templateId = createTemplateFromMappings(result.getFieldMappings(), providerCode, providerId);
+            Long templateId = getOrCreateTemplate(result.getFieldMappings(), providerCode, providerId);
             r.setTemplateId(templateId);
             log.info("[WRITE] Template id={}", templateId);
 
-            int count = 0;
-            if (result.getFieldMappings() != null && templateId != null) {
+            // Mappings: 先删后建（幂等）
+            if (templateId != null && result.getFieldMappings() != null) {
+                deleteExistingMappings(templateId);
+                int count = 0;
                 for (FieldMappingSuggestion m : result.getFieldMappings()) {
-                    createFieldMapping(templateId, m, count);
-                    count++;
+                    if (m.getFundField() != null && !m.getFundField().isBlank()) {
+                        createFieldMapping(templateId, m, count);
+                        count++;
+                    }
                 }
+                r.setMappingCount(count);
+                log.info("[WRITE] Mappings {} rows", count);
             }
-            r.setMappingCount(count);
-            log.info("[WRITE] Mappings {} rows", count);
 
             if (result.getFlowDsl() != null && result.getFlowDsl().getNodes() != null) {
-                Long flowId = createFlow(result.getFlowDsl(), result.getProviderConfig(),
+                Long flowId = getOrCreateFlow(result.getFlowDsl(), result.getProviderConfig(),
                         providerCode, flowType, providerId);
                 r.setFlowId(flowId);
                 log.info("[WRITE] Flow id={}", flowId);
@@ -59,31 +63,74 @@ public class ConfigWriter {
         return r;
     }
 
-    // ── Provider ──
-    private Long createProvider(ProviderConfig cfg, String code) throws Exception {
+    // ── Provider（幂等：先查后建）──
+    private Long getOrCreateProvider(ProviderConfig cfg, String code) throws Exception {
+        Long existing = findProviderByCode(code);
+        if (existing != null) {
+            log.info("[WRITE] Provider exists code={} id={}", code, existing);
+            return existing;
+        }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("providerCode", code);
         body.put("providerName", cfg != null && cfg.getProviderName() != null ? cfg.getProviderName() : code);
         body.put("baseUrl", cfg != null && cfg.getBaseUrl() != null ? cfg.getBaseUrl() : "");
         body.put("timeoutMs", 5000);
         Map<String, Object> resp = post("/api/admin/providers", body);
-        Object data = resp.get("data");
-        if (data instanceof Map) return ((Number) ((Map) data).get("id")).longValue();
-        return ((Number) data).longValue();
+        return extractId(resp);
     }
 
-    // ── Template — 从最终 mappings 全量构建 FreeMarker ──
-    private Long createTemplateFromMappings(List<FieldMappingSuggestion> mappings,
-                                            String providerCode, Long providerId) throws Exception {
-        String templateCode = "AI_" + providerCode + "_" + (System.currentTimeMillis() % 100000);
+    private Long findProviderByCode(String code) throws Exception {
+        List<Map> records = listAll("/api/admin/providers");
+        for (Map r : records) {
+            if (code.equals(r.get("providerCode"))) {
+                Object id = r.get("id");
+                return id instanceof Number ? ((Number) id).longValue() : Long.parseLong(id.toString());
+            }
+        }
+        return null;
+    }
 
-        StringBuilder content = new StringBuilder("{\n");
+    // ── Template（幂等：code 用 providerCode 固定，重复则复用）──
+    private Long getOrCreateTemplate(List<FieldMappingSuggestion> mappings,
+                                      String providerCode, Long providerId) throws Exception {
+        String templateCode = "AI_" + providerCode;
+        Long existing = findTemplateByCode(templateCode);
+        if (existing != null) {
+            log.info("[WRITE] Template exists code={} id={}", templateCode, existing);
+            return existing;
+        }
+
+        String content = buildFreeMarker(mappings);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("templateCode", templateCode);
+        body.put("templateName", providerCode + " AI生成模板");
+        body.put("templateType", "REQUEST");
+        body.put("providerId", providerId);
+        body.put("content", content);
+
+        Map<String, Object> resp = post("/api/admin/templates", body);
+        return extractId(resp);
+    }
+
+    private Long findTemplateByCode(String code) throws Exception {
+        List<Map> records = listAll("/api/admin/templates");
+        for (Map r : records) {
+            if (code.equals(r.get("templateCode"))) {
+                Object id = r.get("id");
+                return id instanceof Number ? ((Number) id).longValue() : Long.parseLong(id.toString());
+            }
+        }
+        return null;
+    }
+
+    private String buildFreeMarker(List<FieldMappingSuggestion> mappings) {
         List<FieldMappingSuggestion> valid = new ArrayList<>();
         if (mappings != null) {
             for (FieldMappingSuggestion m : mappings) {
                 if (m.getFundField() != null && !m.getFundField().isBlank()) valid.add(m);
             }
         }
+        StringBuilder content = new StringBuilder("{\n");
         for (int i = 0; i < valid.size(); i++) {
             FieldMappingSuggestion m = valid.get(i);
             String name = m.getFundField();
@@ -97,18 +144,31 @@ public class ConfigWriter {
             }
         }
         content.append("}");
+        return content.toString();
+    }
 
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("templateCode", templateCode);
-        body.put("templateName", providerCode + " AI生成模板");
-        body.put("templateType", "REQUEST");
-        body.put("providerId", providerId);
-        body.put("content", content.toString());
-
-        Map<String, Object> resp = post("/api/admin/templates", body);
-        Object data = resp.get("data");
-        if (data instanceof Map) return ((Number) ((Map) data).get("id")).longValue();
-        return ((Number) data).longValue();
+    // ── Mappings（幂等：先删后建）──
+    private void deleteExistingMappings(Long templateId) throws Exception {
+        // GET existing mappings → DELETE each
+        String path = "/api/admin/templates/" + templateId + "/mappings";
+        try {
+            String resp = get(path);
+            if (resp != null && !resp.isBlank()) {
+                List<Map> existing = json.readValue(resp, List.class);
+                if (existing != null) {
+                    for (Object item : existing) {
+                        if (item instanceof Map) {
+                            Object id = ((Map) item).get("id");
+                            if (id != null) {
+                                delete("/api/admin/templates/" + templateId + "/mappings/" + id);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[WRITE] Failed to delete old mappings for template {}: {}", templateId, e.getMessage());
+        }
     }
 
     // ── FieldMapping ──
@@ -121,8 +181,40 @@ public class ConfigWriter {
         post("/api/admin/templates/" + templateId + "/mappings", body);
     }
 
-    // ── Flow ──
-    private Long createFlow(FlowDsl dsl, ProviderConfig cfg, String code, String type, Long pid) throws Exception {
+    // ── Flow（幂等：先查后建）──
+    private Long getOrCreateFlow(FlowDsl dsl, ProviderConfig cfg, String code, String type, Long pid) throws Exception {
+        String flowCode = "AI_" + code + "_" + type;
+        Long existing = findFlowByCode(flowCode);
+        if (existing != null) {
+            log.info("[WRITE] Flow exists code={} id={}", flowCode, existing);
+            return existing;
+        }
+
+        enrichFlowDsl(dsl, cfg);
+        Map<String, Object> graphData = Map.of("nodes", dsl.getNodes(), "edges",
+                dsl.getEdges() != null ? dsl.getEdges() : Collections.emptyList());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("flowCode", flowCode);
+        body.put("flowName", code + " AI生成流程");
+        body.put("flowType", type);
+        body.put("providerId", pid);
+        body.put("graphData", json.writeValueAsString(graphData));
+        Map<String, Object> resp = post("/api/admin/flows", body);
+        return extractId(resp);
+    }
+
+    private Long findFlowByCode(String code) throws Exception {
+        List<Map> records = listAll("/api/admin/flows");
+        for (Map r : records) {
+            if (code.equals(r.get("flowCode"))) {
+                Object id = r.get("id");
+                return id instanceof Number ? ((Number) id).longValue() : Long.parseLong(id.toString());
+            }
+        }
+        return null;
+    }
+
+    private void enrichFlowDsl(FlowDsl dsl, ProviderConfig cfg) {
         for (FlowNode node : dsl.getNodes()) {
             Map<String, Object> data = node.getData();
             if (data == null) data = new LinkedHashMap<>();
@@ -137,6 +229,7 @@ public class ConfigWriter {
             node.setData(data);
 
             if ("SEND_TO_FUND".equals(node.getType())) {
+                @SuppressWarnings("unchecked")
                 Map<String, Object> config = (Map<String, Object>) data.get("config");
                 if (config == null) { config = new LinkedHashMap<>(); data.put("config", config); }
                 if (!config.containsKey("url") || config.get("url") == null) {
@@ -148,10 +241,13 @@ public class ConfigWriter {
         for (FlowNode node : dsl.getNodes()) {
             if (!"CONDITION".equals(node.getType())) continue;
             List<FlowEdge> outEdges = new ArrayList<>();
-            for (FlowEdge e : dsl.getEdges()) {
-                if (node.getId().equals(e.getSource())) outEdges.add(e);
+            if (dsl.getEdges() != null) {
+                for (FlowEdge e : dsl.getEdges()) {
+                    if (node.getId().equals(e.getSource())) outEdges.add(e);
+                }
             }
             Map<String, Object> nd = node.getData();
+            @SuppressWarnings("unchecked")
             Map<String, Object> ndCfg = nd != null ? (Map<String, Object>) nd.get("config") : null;
             if (ndCfg == null) { ndCfg = new LinkedHashMap<>(); nd.put("config", ndCfg); }
             for (int i = 0; i < outEdges.size(); i++) {
@@ -170,26 +266,22 @@ public class ConfigWriter {
                 }
             }
         }
-
-        Map<String, Object> graphData = Map.of("nodes", dsl.getNodes(), "edges", dsl.getEdges());
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("flowCode", "AI_" + code + "_" + type);
-        body.put("flowName", code + " AI生成流程");
-        body.put("flowType", type);
-        body.put("providerId", pid);
-        body.put("graphData", json.writeValueAsString(graphData));
-        Map<String, Object> resp = post("/api/admin/flows", body);
-        Object data = resp.get("data");
-        if (data instanceof Number) return ((Number) data).longValue();
-        if (data instanceof Map) {
-            Object id = ((Map) data).get("id");
-            if (id instanceof Number) return ((Number) id).longValue();
-            return Long.parseLong(id.toString());
-        }
-        return 0L;
     }
 
-    // ── HTTP ──
+    // ── HTTP helpers ──
+    private List<Map> listAll(String path) throws Exception {
+        String resp = get(path + "?page=1&size=200");
+        if (resp == null || resp.isBlank()) return Collections.emptyList();
+        Map<String, Object> root = json.readValue(resp, Map.class);
+        Object data = root.get("data");
+        if (data instanceof Map) {
+            Object records = ((Map) data).get("records");
+            if (records instanceof List) return (List<Map>) records;
+        }
+        if (data instanceof List) return (List<Map>) data;
+        return Collections.emptyList();
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> post(String path, Object body) throws Exception {
         URI uri = new URI(fundlinkUrl + path);
@@ -197,6 +289,8 @@ public class ConfigWriter {
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setDoOutput(true);
+        conn.setConnectTimeout(10000);
+        conn.setReadTimeout(15000);
         String b = json.writeValueAsString(body);
         try (OutputStream os = conn.getOutputStream()) { os.write(b.getBytes(StandardCharsets.UTF_8)); }
         if (conn.getResponseCode() >= 400) {
@@ -204,6 +298,38 @@ public class ConfigWriter {
             throw new RuntimeException("FundLink API error " + conn.getResponseCode() + ": " + err);
         }
         return json.readValue(conn.getInputStream(), Map.class);
+    }
+
+    private String get(String path) throws Exception {
+        URI uri = new URI(fundlinkUrl + path);
+        HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        if (conn.getResponseCode() == 200) {
+            return new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        }
+        return null;
+    }
+
+    private void delete(String path) throws Exception {
+        URI uri = new URI(fundlinkUrl + path);
+        HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
+        conn.setRequestMethod("DELETE");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        conn.getResponseCode(); // fire and forget
+    }
+
+    private Long extractId(Map<String, Object> resp) {
+        Object data = resp.get("data");
+        if (data instanceof Number) return ((Number) data).longValue();
+        if (data instanceof Map) {
+            Object id = ((Map) data).get("id");
+            if (id instanceof Number) return ((Number) id).longValue();
+            if (id != null) return Long.parseLong(id.toString());
+        }
+        return 0L;
     }
 
     public static class WriteResult {
