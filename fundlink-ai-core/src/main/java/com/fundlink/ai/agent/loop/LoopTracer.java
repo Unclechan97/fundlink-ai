@@ -34,7 +34,8 @@ public class LoopTracer {
                       long durationMs, boolean success, String errorMsg) {
         try {
             AiAgentTrace t = new AiAgentTrace();
-            t.setTraceId(traceId);
+            // traceId 可能重跑时重复 — 加时间戳后缀确保唯一
+            t.setTraceId(traceId + "-" + System.currentTimeMillis() % 100000);
             t.setTaskId(taskId);
             t.setPhase(phase);
             t.setAgentName(agentType);
