@@ -85,8 +85,15 @@ public class LlmGatewayImpl implements LlmGateway {
             }
         }
 
-        log.error("[GATEWAY] All providers exhausted  traceId={}  chain={}",
-                request.getTraceId(), chain);
+        log.error("");
+        log.error("╔══════════════════════════════════════════════╗");
+        log.error("║  [GATEWAY] ALL PROVIDERS FAILED              ║");
+        log.error("║  traceId: {}                       ║", request.getTraceId());
+        log.error("║  chain tried: {}                         ║", String.join(" → ", chain));
+        log.error("║  available: {}                            ║", providers.keySet());
+        log.error("║  last error: {}                           ║", lastError != null ? lastError.getMessage() : "null");
+        log.error("╚══════════════════════════════════════════════╝");
+        log.error("");
         throw new RuntimeException(
                 "All LLM providers failed: " + chain, lastError);
     }
