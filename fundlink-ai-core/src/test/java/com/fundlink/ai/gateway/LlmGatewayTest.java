@@ -58,13 +58,17 @@ class LlmGatewayTest {
     }
 
     @Test
-    void shouldThrowWhenProviderNotFound() {
+    void shouldFallbackWhenExplicitProviderMissing() {
+        // Request non-existent explicit provider — should fall back via chain to deepseek
         LlmRequest request = LlmRequest.of("nonexistent", "any",
-                "test", "trace-err");
+                "test fallback", "trace-fallback");
 
-        assertThatThrownBy(() -> gateway.chat(request))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Provider not found");
+        LlmResponse response = gateway.chat(request);
+
+        // Fallback succeeded via chain (deepseek fake is registered)
+        assertThat(response.getContent()).isNotBlank();
+        // Provider should be the one that actually served the request
+        assertThat(response.getProvider()).isIn("deepseek", "qwen");
     }
 
     @Test

@@ -23,10 +23,20 @@ public class LlmRequest {
         return r;
     }
 
+    /** 创建任务驱动请求 — provider=null，交由 SmartRouter 选择 */
+    public static LlmRequest ofTask(String taskType, String prompt, String traceId) {
+        LlmRequest r = new LlmRequest();
+        r.taskType = taskType;
+        r.prompt = prompt;
+        r.traceId = traceId;
+        return r;
+    }
+
     public String getProvider() { return provider; }
     public String getModel() { return model; }
     public String getSystemPrompt() { return systemPrompt; }
     public String getPrompt() { return prompt; }
+    public String getTaskType() { return taskType; }
     public Double getTemperature() { return temperature; }
     public Integer getMaxTokens() { return maxTokens; }
     public String getTraceId() { return traceId; }

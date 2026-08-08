@@ -27,7 +27,7 @@ public class CopilotController {
     @PostMapping("/analyze")
     public ApiAiResponse<RequirementResult> analyze(@RequestBody AnalyzeRequest req) {
         RequirementResult result = requirementAgent.analyze(
-                req.getDocumentText(), req.getProviderCode());
+                req.getDocumentText(), req.getProviderCode(), null);
         if (result.getParseError() != null) {
             return ApiAiResponse.error("AI 解析异常: " + result.getParseError(), result);
         }
@@ -51,7 +51,7 @@ public class CopilotController {
     @PostMapping("/suggest-mappings")
     public ApiAiResponse<List<Map<String, Object>>> suggestMappings(@RequestBody AnalyzeRequest req) {
         RequirementResult result = requirementAgent.analyze(
-                req.getDocumentText(), req.getProviderCode());
+                req.getDocumentText(), req.getProviderCode(), null);
 
         List<Map<String, Object>> mappings = result.getFieldMappings().stream()
                 .<Map<String, Object>>map(m -> {

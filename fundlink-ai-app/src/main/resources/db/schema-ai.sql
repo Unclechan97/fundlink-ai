@@ -9,8 +9,15 @@ CREATE TABLE IF NOT EXISTS ai_task (
     status        VARCHAR(16)  DEFAULT 'PENDING' COMMENT 'PENDING/RUNNING/DONE/FAILED',
     input_data    MEDIUMTEXT   COMMENT '输入数据(JSON)',
     output_data   MEDIUMTEXT   COMMENT '输出数据(JSON)',
+    current_round INT          DEFAULT 0 COMMENT '当前轮次',
+    max_rounds    INT          DEFAULT 3 COMMENT '最大轮次',
+    flow_type     VARCHAR(20)  COMMENT 'LOAN/CREDIT/REPAY',
+    provider_code VARCHAR(64)  COMMENT '资金方编码',
+    document_text MEDIUMTEXT   COMMENT '输入文档原文',
+    current_result JSON        COMMENT '当前轮次结果快照',
     trace_id      VARCHAR(64)  COMMENT '关联Trace',
-    create_time   DATETIME     DEFAULT CURRENT_TIMESTAMP
+    create_time   DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    update_time   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 -- 2. LLM 调用审计日志（金融合规核心）
@@ -36,14 +43,20 @@ CREATE TABLE IF NOT EXISTS ai_agent_trace (
     id            BIGINT PRIMARY KEY AUTO_INCREMENT,
     trace_id      VARCHAR(64)  NOT NULL UNIQUE,
     task_id       BIGINT,
+    phase         VARCHAR(20)  COMMENT 'ANALYZE/VALIDATE/DRYRUN/DIAGNOSE',
     agent_name    VARCHAR(64)  NOT NULL,
+    agent_type    VARCHAR(30)  COMMENT 'requirement/testgen/diagnosis',
     step_name     VARCHAR(128),
     input_text    MEDIUMTEXT,
     output_text   MEDIUMTEXT,
+    input_summary  VARCHAR(500) COMMENT '输入摘要',
+    output_summary TEXT         COMMENT '输出摘要',
     tool_calls    JSON         COMMENT '工具调用记录',
     token_usage   JSON         COMMENT '{input,output,total}',
     latency_ms    INT          DEFAULT 0,
+    duration_ms   INT          COMMENT '执行耗时',
     status        VARCHAR(16)  DEFAULT 'RUNNING',
+    success       TINYINT(1)   COMMENT '是否成功',
     error_msg     TEXT,
     start_time    DATETIME,
     end_time      DATETIME,

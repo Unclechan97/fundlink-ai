@@ -10,6 +10,8 @@ import com.fundlink.ai.gateway.LlmResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import com.fundlink.ai.agent.diagnosis.DiagnosisResult;
+
 import java.util.*;
 
 @Slf4j
@@ -29,7 +31,8 @@ public class RequirementAgentImpl implements RequirementAgent {
     }
 
     @Override
-    public RequirementResult analyze(String documentText, String providerCode) {
+    public RequirementResult analyze(String documentText, String providerCode,
+                                      List<DiagnosisResult> previousErrors) {
         String traceId = "req-" + UUID.randomUUID().toString().substring(0, 8);
         log.info("[REQ-AGENT] Start  traceId={}  provider={}  docLen={}",
                 traceId, providerCode, documentText.length());
@@ -40,10 +43,16 @@ public class RequirementAgentImpl implements RequirementAgent {
 
         // 2. 组装 Prompt (模板 + 字段目录 + RAG)
         String prompt = promptBuilder.build(documentText, providerCode, "loan", ragExamples);
+
+        // 2b. 注入上一轮诊断结果 (Retry 修正)
+        if (previousErrors != null && !previousErrors.isEmpty()) {
+            prompt = injectPreviousErrors(prompt, previousErrors);
+        }
+
         log.info("[REQ-AGENT] Prompt built  traceId={}  len={}", traceId, prompt.length());
 
         // 3. 调 LLM
-        LlmRequest request = LlmRequest.of("qwen", "qwen-plus", prompt, traceId);
+        LlmRequest request = LlmRequest.ofTask("requirement", prompt, traceId);
         LlmResponse response = llmGateway.chat(request);
 
         // 4. 安全解析
@@ -69,6 +78,26 @@ public class RequirementAgentImpl implements RequirementAgent {
     private int countFields(RequirementResult r) {
         var s = r.getInterfaceSchema();
         return (s != null && s.getFields() != null) ? s.getFields().size() : 0;
+    }
+
+    /** 注入上一轮诊断结果到 Prompt — design §3.1 */
+    private String injectPreviousErrors(String prompt, List<DiagnosisResult> errors) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 上一轮验证失败，请修正:\n");
+        for (int i = 0; i < errors.size(); i++) {
+            DiagnosisResult e = errors.get(i);
+            sb.append("- 阶段: ").append(e.getPhase() != null ? e.getPhase() : "UNKNOWN");
+            if (e.getRootCause() != null) {
+                sb.append(", 诊断: ").append(e.getRootCause());
+            }
+            if (e.getFixSuggestion() != null) {
+                sb.append("\n  建议: ").append(e.getFixSuggestion());
+            }
+            sb.append("\n");
+        }
+        sb.append("\n请基于建议修正，重新输出完整 JSON。\n\n");
+        sb.append(prompt);
+        return sb.toString();
     }
 
     /** 使用 JsonNode 安全解析，字段缺失不抛异常。JSON 完全不可解析时设置 parseError */
