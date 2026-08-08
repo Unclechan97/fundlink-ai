@@ -17,19 +17,16 @@ public class SmartRouter {
     public ModelSelection select(String taskType) {
         return switch (taskType != null ? taskType : "default") {
             case "simple", "classification" -> {
-                // 简单任务 → Qwen
-                yield new ModelSelection("qwen", "qwen-plus", 0.002, 0.008);
+                yield new ModelSelection("siliconflow", "Qwen/Qwen3-8B", 0, 0);
             }
             case "requirement", "testgen" -> {
-                // 配置生成 → Qwen (体验额度)
-                yield new ModelSelection("qwen", "qwen-plus", 0.002, 0.008);
+                yield new ModelSelection("siliconflow", "Qwen/Qwen3-8B", 0, 0);
             }
             case "diagnosis", "complex" -> {
-                // 复杂诊断 → Claude (推理能力强)
-                yield new ModelSelection("claude", "claude-haiku-4-5-20251001", 0.001, 0.005);
+                yield new ModelSelection("siliconflow", "Qwen/Qwen3-8B", 0, 0);
             }
             default -> {
-                yield new ModelSelection("qwen", "qwen-plus", 0.002, 0.008);
+                yield new ModelSelection("siliconflow", "Qwen/Qwen3-8B", 0, 0);
             }
         };
     }

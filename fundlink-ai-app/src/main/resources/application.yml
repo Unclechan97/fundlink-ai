@@ -42,10 +42,16 @@ fundlink:
         default-model: qwen-plus
         input-price: 0.002      # USD/1K tokens (qwen-plus)
         output-price: 0.008
+      siliconflow:
+        base-url: https://api.siliconflow.cn/v1
+        api-key: ${SILICONFLOW_API_KEY:sk-wzabjteielnrnyrjyskxxjnvetqwxpbapkohavopptciqvxq}
+        default-model: Qwen/Qwen3-8B
+        input-price: 0          # 免费模型
+        output-price: 0
     # 路由策略
     router:
-      default-provider: qwen
-      fallback-chain: qwen,deepseek
+      default-provider: siliconflow
+      fallback-chain: siliconflow,qwen,deepseek
       retry-max: 2
 
   # RAG 服务地址
