@@ -1,15 +1,12 @@
 package com.fundlink.ai.feedback;
 
+import com.fundlink.ai.gateway.RagGateway;
 import com.fundlink.ai.mapper.AiFeedbackMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -24,6 +21,7 @@ import java.util.Map;
 public class KnowledgeAutoWriter {
 
     private final AiFeedbackMapper feedbackMapper;
+    private final RagGateway ragGateway;
 
     /** 每周日 3:30 AM — 在 PatternAnalyzer 之后运行 */
     @Scheduled(cron = "0 30 3 * * SUN")
@@ -40,7 +38,7 @@ public class KnowledgeAutoWriter {
             Object freq = p.get("freq");
             try {
                 String markdown = buildKnowledgeEntry(category, freq);
-                boolean ok = callRagKnowledgeUpsert(category, markdown);
+                boolean ok = ragGateway.upsertKnowledge(category, "AUTO", markdown);
                 if (ok) {
                     written++;
                     log.info("Auto-write: {} → RAG ({}次)", category, freq);
@@ -66,24 +64,5 @@ public class KnowledgeAutoWriter {
             ### 验证状态
             已通过 %s 次人工审核确认，置信度高。
             """, type, freq, date, freq);
-    }
-
-    private boolean callRagKnowledgeUpsert(String kind, String markdown) {
-        try {
-            URI uri = new URI("http://localhost:8000/knowledge/upsert");
-            HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setDoOutput(true);
-            String body = "{\"kind\":\"" + kind + "\",\"provider_code\":\"AUTO\",\"markdown\":\""
-                    + markdown.replace("\"", "\\\"").replace("\n", "\\n") + "\"}";
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(body.getBytes(StandardCharsets.UTF_8));
-            }
-            return conn.getResponseCode() == 200;
-        } catch (Exception e) {
-            log.warn("RAG service not available: {}", e.getMessage());
-            return false;
-        }
     }
 }

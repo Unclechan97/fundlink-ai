@@ -407,11 +407,31 @@ public class AgentLoopOrchestrator {
                 doDecision(s);
             }
             case "EDIT_AND_RETRY" -> {
-                // TODO: apply editedResult from frontend
                 s.round++;
-                s.phase = TaskPhase.ANALYZE;
-                persistTask(s, "ANALYZE");
-                eventPublisher.phaseStart(s.taskId, "ANALYZE", s.round + 1, s.maxRounds);
+                // 如果前端传了编辑后的结果，直接用（跳过 LLM 重新解析）
+                if (decision.getEditedResult() != null) {
+                    log.info("[LOOP] EDIT_AND_RETRY with editedResult  task={}", s.taskId);
+                    s.currentResult = decision.getEditedResult();
+                    ConfigWriter.WriteResult write = configWriter.writeAll(
+                            decision.getEditedResult(), s.providerCode, s.flowType);
+                    s.writeResult = write;
+                    if (!write.isSuccess()) {
+                        log.warn("[LOOP] EDIT_AND_RETRY config rewrite failed: {}", write.getError());
+                        s.lastError = "Edited config write failed: " + write.getError();
+                        s.phase = TaskPhase.DIAGNOSE;
+                    } else {
+                        s.phase = TaskPhase.VALIDATE;
+                        persistTask(s, "VALIDATE");
+                        eventPublisher.phaseStart(s.taskId, "VALIDATE", s.round + 1, s.maxRounds);
+                    }
+                } else {
+                    // 无编辑内容 — 纯重试
+                    s.previousErrors.add(s.lastDiagnosis != null ? s.lastDiagnosis
+                            : createErrorDiag(s.lastError));
+                    s.phase = TaskPhase.ANALYZE;
+                    persistTask(s, "ANALYZE");
+                    eventPublisher.phaseStart(s.taskId, "ANALYZE", s.round + 1, s.maxRounds);
+                }
             }
             case "PUBLISH" -> {
                 s.phase = TaskPhase.PUBLISH;

@@ -60,10 +60,8 @@ public class RagGateway {
     public boolean upsertKnowledge(String kind, String providerCode, String markdown) {
         try {
             String token = ensureToken();
-            String escaped = markdown.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
-            String body = String.format(
-                    "{\"kind\":\"%s\",\"provider_code\":\"%s\",\"markdown\":\"%s\"}",
-                    kind, providerCode, escaped);
+            String body = json.writeValueAsString(
+                    java.util.Map.of("kind", kind, "provider_code", providerCode, "markdown", markdown));
             String resp = postJson("/knowledge/upsert", body, token);
             return resp != null;
         } catch (Exception e) {

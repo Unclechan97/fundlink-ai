@@ -97,6 +97,25 @@ public class LoopController {
         ));
     }
 
+    /** Get current analysis result for editing */
+    @GetMapping("/{taskId}/result")
+    public CopilotController.ApiAiResponse<Object> getResult(@PathVariable Long taskId) {
+        AiTask task = taskMapper.selectById(taskId);
+        if (task == null) {
+            return CopilotController.ApiAiResponse.error("Task not found", null);
+        }
+        if (task.getCurrentResult() == null) {
+            return CopilotController.ApiAiResponse.error("No result available", null);
+        }
+        try {
+            Object result = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(task.getCurrentResult(), Object.class);
+            return CopilotController.ApiAiResponse.success(result);
+        } catch (Exception e) {
+            return CopilotController.ApiAiResponse.error("Failed to parse result: " + e.getMessage(), null);
+        }
+    }
+
     // -- DTO --
 
     public static class CreateLoopRequest {
