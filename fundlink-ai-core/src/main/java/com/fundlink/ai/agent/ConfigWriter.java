@@ -149,19 +149,20 @@ public class ConfigWriter {
 
     // ── Mappings（幂等：先删后建）──
     private void deleteExistingMappings(Long templateId) throws Exception {
-        // GET existing mappings → DELETE each
         String path = "/api/admin/templates/" + templateId + "/mappings";
         try {
             String resp = get(path);
             if (resp != null && !resp.isBlank()) {
-                List<Map> existing = json.readValue(resp, List.class);
-                if (existing != null) {
-                    for (Object item : existing) {
-                        if (item instanceof Map) {
-                            Object id = ((Map) item).get("id");
-                            if (id != null) {
-                                delete("/api/admin/templates/" + templateId + "/mappings/" + id);
-                            }
+                // 解包 {code:0, data:[...]} → 取 data
+                Map<String, Object> root = json.readValue(resp, Map.class);
+                Object data = root.get("data");
+                if (data instanceof List) {
+                    @SuppressWarnings("unchecked")
+                    List<Map> existing = (List<Map>) data;
+                    for (Map item : existing) {
+                        Object id = item.get("id");
+                        if (id != null) {
+                            delete("/api/admin/templates/" + templateId + "/mappings/" + id);
                         }
                     }
                 }
@@ -183,7 +184,7 @@ public class ConfigWriter {
 
     // ── Flow（幂等：先查后建）──
     private Long getOrCreateFlow(FlowDsl dsl, ProviderConfig cfg, String code, String type, Long pid) throws Exception {
-        String flowCode = "AI_" + code + "_" + type;
+        String flowCode = type + "_" + code;  // 匹配上游 flowType_providerCode
         Long existing = findFlowByCode(flowCode);
         if (existing != null) {
             log.info("[WRITE] Flow exists code={} id={}", flowCode, existing);
