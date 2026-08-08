@@ -270,6 +270,22 @@ public class AgentLoopOrchestrator {
             return;
         }
 
+        // Ensure flow is published before dry-run (defensive — FundLink creates with status=1 already)
+        try {
+            URI pubUri = new URI("http://localhost:8080/api/admin/flows/" + flowId + "/publish");
+            HttpURLConnection pubConn = (HttpURLConnection) pubUri.toURL().openConnection();
+            pubConn.setRequestMethod("PUT");
+            pubConn.setRequestProperty("Content-Type", "application/json");
+            pubConn.setDoOutput(true);
+            pubConn.setConnectTimeout(5000);
+            pubConn.setReadTimeout(5000);
+            pubConn.getOutputStream().write("{}".getBytes(StandardCharsets.UTF_8));
+            int pubCode = pubConn.getResponseCode();
+            log.info("[LOOP] Flow publish before DRYRUN  flowId={}  httpCode={}", flowId, pubCode);
+        } catch (Exception e) {
+            log.warn("[LOOP] Flow publish before DRYRUN failed (non-fatal): {}", e.getMessage());
+        }
+
         long start = System.currentTimeMillis();
         FlowDryRunner.DryRunResult dr = flowDryRunner.dryRun(
                 s.taskId, flowId, tg,
