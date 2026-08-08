@@ -36,8 +36,22 @@ public class TemplateValidator {
     public ValidationResult validate(Long templateId, Map<String, Object> previewData,
                                       List<FieldMappingSuggestion> fieldMappings) {
         try {
+            // 0. 护盾: 如果 LLM 返回了数组类型的数据源，取第一个元素
+            Map<String, Object> safeData = new LinkedHashMap<>();
+            if (previewData != null) {
+                for (Map.Entry<String, Object> e : previewData.entrySet()) {
+                    Object v = e.getValue();
+                    if (v instanceof List && !((List) v).isEmpty()) {
+                        log.warn("[VALIDATOR] Data source '{}' is array, taking first element", e.getKey());
+                        safeData.put(e.getKey(), ((List) v).get(0));
+                    } else {
+                        safeData.put(e.getKey(), v);
+                    }
+                }
+            }
+
             // 1. 调 Preview API
-            String body = "{\"testData\":\"" + json.writeValueAsString(previewData)
+            String body = "{\"testData\":\"" + json.writeValueAsString(safeData)
                     .replace("\\", "\\\\").replace("\"", "\\\"") + "\"}";
 
             String resp = postJson(fundlinkUrl + "/api/admin/templates/" + templateId + "/preview", body);

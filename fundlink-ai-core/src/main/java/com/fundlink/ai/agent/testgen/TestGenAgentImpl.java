@@ -93,7 +93,7 @@ public class TestGenAgentImpl implements TestGenAgent {
                 "userInfo": {"realName": "张三", "idNo": "110101199001011234", "mobile": "13800138000"},
                 "loanInfo": {"loanNo": "LN001", "amount": 50000},
                 "riskData": {"score": 85, "level": "A"},
-                "paymentData": {}
+                "paymentData": {"bankCardNo": "6222021234567890", "bankCode": "308584000013"}
               },
               "testCases": [
                 {
@@ -112,7 +112,9 @@ public class TestGenAgentImpl implements TestGenAgent {
             ```
 
             ## 规则
-            - previewData: 为每个数据源(userInfo/loanInfo/riskData/paymentData)提供 2-3 条示例数据
+            - previewData: 每个数据源(userInfo/loanInfo/riskData/paymentData)必须是单个 JSON 对象，不是数组！
+              错误示例: "userInfo": [{"realName":"张三"}]
+              正确示例: "userInfo": {"realName":"张三","idNo":"110101199001011234","mobile":"13800138000"}
             - testCases: CONDITION 节点的每条出边至少生成 1 个用例
             - targetBranch: 必须等于下面列出的 branch ID
             - inputData: FlowEngine 入口输入

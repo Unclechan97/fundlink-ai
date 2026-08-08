@@ -52,7 +52,9 @@ public class AuditPersistenceService {
             AiLlmAudit audit = new AiLlmAudit();
             audit.setCallId(UUID.randomUUID().toString());
             audit.setProvider(providerName.toUpperCase());
-            audit.setModel(response != null ? response.getModel() : request.getModel());
+            audit.setModel(response != null && response.getModel() != null
+                    ? response.getModel()
+                    : (request.getModel() != null ? request.getModel() : "unknown"));
             audit.setTokenInput(response != null ? response.getTokenUsage().getInputTokens() : 0);
             audit.setTokenOutput(response != null ? response.getTokenUsage().getOutputTokens() : 0);
             audit.setCostAmount(response != null
