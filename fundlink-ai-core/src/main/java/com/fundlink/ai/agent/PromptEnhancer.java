@@ -20,6 +20,15 @@ public class PromptEnhancer {
     }
 
     /**
+     * RAG 语义检索（供 Agent 直接调用）
+     * @param query 搜索查询
+     * @return 检索到的文本片段列表
+     */
+    public List<String> search(String query) {
+        return ragGateway.search(query, 3);
+    }
+
+    /**
      * 用 RAG 检索结果增强 Prompt
      * @param basePrompt 原始 Prompt
      * @param query 搜索查询(用任务关键词构建)
