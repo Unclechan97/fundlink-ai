@@ -7,8 +7,6 @@ import com.fundlink.ai.gateway.LlmRequest;
 import com.fundlink.ai.gateway.LlmResponse;
 import com.fundlink.ai.gateway.TokenUsage;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -19,53 +17,71 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 硅基流动 (SiliconFlow) — 免费 Qwen3-8B 模型，OpenAI 兼容 API
+ * OpenAI 兼容 API Provider — 配置驱动，支持任意 OpenAI 兼容的 LLM 服务。
+ * <p>
+ * 当前已适配：SiliconFlow / 阿里云 DashScope(Qwen) / DeepSeek。
+ * 新增 provider 只需在 application.yml 添加配置 + LlmProviderConfig 注册 bean。
  */
 @Slf4j
-@Component("siliconflow")
-public class SiliconFlowProvider implements LlmProvider {
+public class OpenAiCompatibleProvider implements LlmProvider {
 
+    private static final String DEFAULT_SYSTEM_PROMPT = "你是资金接入系统专家。严格按JSON格式输出。";
+
+    private final String name;
     private final String baseUrl;
     private final String apiKey;
+    private final String defaultModel;
+    private final Duration requestTimeout;
     private final ObjectMapper json = new ObjectMapper();
-    private final HttpClient http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(30))
-            .build();
+    private final HttpClient http;
 
-    public SiliconFlowProvider(
-            @Value("${fundlink.llm.providers.siliconflow.base-url:https://api.siliconflow.cn/v1}") String baseUrl,
-            @Value("${fundlink.llm.providers.siliconflow.api-key:}") String apiKey) {
+    public OpenAiCompatibleProvider(String name, String baseUrl,
+                                     String apiKey, String defaultModel,
+                                     Duration connectTimeout, Duration requestTimeout) {
+        this.name = name;
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
-        log.info("[LLM] SiliconFlow provider ready  model=Qwen/Qwen3-8B  baseUrl={}", baseUrl);
+        this.defaultModel = defaultModel;
+        this.requestTimeout = requestTimeout;
+        this.http = HttpClient.newBuilder()
+                .connectTimeout(connectTimeout)
+                .build();
+        log.info("[LLM] Provider ready  name={}  model={}  baseUrl={}  connectTimeout={}  requestTimeout={}",
+                name, defaultModel, baseUrl, connectTimeout, requestTimeout);
     }
 
-    @Override public String name() { return "siliconflow"; }
-    @Override public boolean supports(String m) { return true; }
+    @Override
+    public String name() {
+        return name;
+    }
+
+    @Override
+    public boolean supports(String model) {
+        return true;
+    }
 
     @Override
     public LlmResponse chat(LlmRequest request) {
         long start = System.currentTimeMillis();
-        String model = request.getModel() != null ? request.getModel() : "Qwen/Qwen3-8B";
+        String model = request.getModel() != null ? request.getModel() : defaultModel;
         String systemPrompt = request.getSystemPrompt() != null
-                ? request.getSystemPrompt()
-                : "你是资金接入系统专家。严格按JSON格式输出。";
+                ? request.getSystemPrompt() : DEFAULT_SYSTEM_PROMPT;
         double temperature = request.getTemperature() != null ? request.getTemperature() : 0.1;
         int maxTokens = request.getMaxTokens() != null ? request.getMaxTokens() : 4096;
 
-        log.info("[LLM] >>> SiliconFlow call  traceId={}  model={}  promptLen={}",
-                request.getTraceId(), model,
+        log.info("[LLM] >>> {} call  traceId={}  model={}  promptLen={}",
+                name, request.getTraceId(), model,
                 request.getPrompt() != null ? request.getPrompt().length() : 0);
 
         try {
             var body = Map.of(
-                "model", model,
-                "messages", List.of(
-                    Map.of("role", "system", "content", systemPrompt),
-                    Map.of("role", "user", "content", request.getPrompt())
-                ),
-                "temperature", temperature,
-                "max_tokens", maxTokens
+                    "model", model,
+                    "messages", List.of(
+                            Map.of("role", "system", "content", systemPrompt),
+                            Map.of("role", "user", "content", request.getPrompt())
+                    ),
+                    "temperature", temperature,
+                    "max_tokens", maxTokens
             );
 
             var httpReq = HttpRequest.newBuilder()
@@ -73,7 +89,7 @@ public class SiliconFlowProvider implements LlmProvider {
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Bearer " + apiKey)
                     .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
-                    .timeout(Duration.ofMinutes(20))
+                    .timeout(requestTimeout)
                     .build();
 
             var httpResp = http.send(httpReq, HttpResponse.BodyHandlers.ofString());
@@ -83,21 +99,21 @@ public class SiliconFlowProvider implements LlmProvider {
             if (statusCode != 200) {
                 String errorDetail = extractError(respBody, statusCode);
                 long elapsed = System.currentTimeMillis() - start;
-                log.error("[LLM] <<< SiliconFlow HTTP {}  traceId={}  latency={}ms  error={}",
-                        statusCode, request.getTraceId(), elapsed, errorDetail);
+                log.error("[LLM] <<< {} HTTP {}  traceId={}  latency={}ms  error={}",
+                        name, statusCode, request.getTraceId(), elapsed, errorDetail);
                 throw new RuntimeException(String.format(
-                        "SiliconFlow API returned HTTP %d: %s", statusCode, errorDetail));
+                        "%s API returned HTTP %d: %s", name, statusCode, errorDetail));
             }
 
             var tree = json.readTree(respBody);
             JsonNode choices = tree.get("choices");
             if (choices == null || !choices.isArray() || choices.isEmpty()) {
                 long elapsed = System.currentTimeMillis() - start;
-                log.error("[LLM] <<< SiliconFlow empty choices  traceId={}  latency={}ms  body={}",
-                        request.getTraceId(), elapsed,
+                log.error("[LLM] <<< {} empty choices  traceId={}  latency={}ms  body={}",
+                        name, request.getTraceId(), elapsed,
                         respBody.length() > 500 ? respBody.substring(0, 500) : respBody);
                 throw new RuntimeException(
-                        "SiliconFlow returned empty choices — check API key and model availability");
+                        name + " returned empty choices — check API key and model availability");
             }
 
             String content = choices.get(0).get("message").get("content").asText();
@@ -106,22 +122,22 @@ public class SiliconFlowProvider implements LlmProvider {
             int out = usage != null ? usage.path("completion_tokens").asInt(0) : 0;
             long elapsed = System.currentTimeMillis() - start;
 
-            log.info("[LLM] <<< SiliconFlow done  traceId={}  latency={}ms  tokens={}/{}  contentLen={}",
-                    request.getTraceId(), elapsed, in, out,
+            log.info("[LLM] <<< {} done  traceId={}  latency={}ms  tokens={}/{}  contentLen={}",
+                    name, request.getTraceId(), elapsed, in, out,
                     content != null ? content.length() : 0);
-            log.debug("[LLM] <<< SiliconFlow content  traceId={}\n{}",
-                    request.getTraceId(), content);
+            log.debug("[LLM] <<< {} content  traceId={}\n{}",
+                    name, request.getTraceId(), content);
 
-            return LlmResponse.of(content, "siliconflow", model,
+            return LlmResponse.of(content, name, model,
                     TokenUsage.of(in, out), elapsed);
 
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
             long elapsed = System.currentTimeMillis() - start;
-            log.error("[LLM] <<< SiliconFlow FAILED  traceId={}  latency={}ms  error={}",
-                    request.getTraceId(), elapsed, e.getMessage());
-            throw new RuntimeException("SiliconFlow call failed: " + e.getMessage(), e);
+            log.error("[LLM] <<< {} FAILED  traceId={}  latency={}ms  error={}",
+                    name, request.getTraceId(), elapsed, e.getMessage());
+            throw new RuntimeException(name + " call failed: " + e.getMessage(), e);
         }
     }
 

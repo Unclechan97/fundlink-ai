@@ -13,6 +13,8 @@ public class RequirementResult {
     private List<FieldMappingSuggestion> fieldMappings = new ArrayList<>();
     private FlowDsl flowDsl;
     private String parseError;
+    /** LLM 解析阶段自动识别的流程类型: LOAN / CREDIT / REPAY */
+    private String flowType;
 
     public ProviderConfig getProviderConfig() { return providerConfig; }
     public void setProviderConfig(ProviderConfig p) { this.providerConfig = p; }
@@ -27,4 +29,7 @@ public class RequirementResult {
 
     public String getParseError() { return parseError; }
     public void setParseError(String parseError) { this.parseError = parseError; }
+
+    public String getFlowType() { return flowType; }
+    public void setFlowType(String flowType) { this.flowType = flowType; }
 }

@@ -17,6 +17,9 @@ public class FieldMappingSuggestion {
     /** 置信度 (0-1) */
     private double confidence;
 
+    /** TODO 备注 (找不到匹配数据源时标注，供人工确认) */
+    private String remark;
+
     public String getFundField() { return fundField; }
     public void setFundField(String f) { this.fundField = f; }
 
@@ -28,4 +31,7 @@ public class FieldMappingSuggestion {
 
     public double getConfidence() { return confidence; }
     public void setConfidence(double c) { this.confidence = c; }
+
+    public String getRemark() { return remark; }
+    public void setRemark(String r) { this.remark = r; }
 }

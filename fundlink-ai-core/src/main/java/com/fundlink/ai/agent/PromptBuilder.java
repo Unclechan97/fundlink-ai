@@ -90,6 +90,7 @@ public class PromptBuilder {
 ## JSON Schema
 ```json
 {
+  "flow_type": "LOAN|CREDIT|REPAY",
   "provider_config": {
     "providerName":"资金方名称(从文档提取)",
     "baseUrl":"接口基础URL(从文档提取)"
@@ -100,7 +101,9 @@ public class PromptBuilder {
     "fields":[{"name":"","type":"String","required":true,"description":""}]
   },
   "field_mappings": [
-    {"fund_field":"custName","source_path":"userInfo.realName","transform":"formatAmount","confidence":0.95}
+    {"fund_field":"custName","source_path":"userInfo.realName","transform":"formatAmount","confidence":0.95,"remark":"TODO说明(可选)"},
+    {"fund_field":"repayAccount.bankCode","source_path":"paymentData.accountNo","transform":null,"confidence":0.90,"remark":null},
+    {"fund_field":"repayAccount.bankName","source_path":"paymentData.bankName","transform":null,"confidence":0.95,"remark":null}
   ],
   "flow_dsl": {
     "nodes":[
@@ -121,15 +124,27 @@ public class PromptBuilder {
 ```
 
 ## 规则
+### flow_type
+- 根据接口文档内容自动判断流程类型:
+  - 文档涉及放款/借款/提款/支用 → LOAN
+  - 文档涉及授信/额度/征信 → CREDIT
+  - 文档涉及还款申请/主动还款/代扣/扣款 → REPAY
+  - 无明显特征时默认 LOAN
+
 ### provider_config
 - providerName: 从文档标题或概述中提取资金方名称
 - baseUrl: 从文档中的请求地址提取基础URL(如只到/api，不含具体路径)
 
 ### field_mappings
+- **完整性要求**: interface_schema.fields 中列出的每一个字段都必须有一条 field_mappings 记录，field_mappings 数量必须等于 fields 数量，一个都不能少
 - 按语义推断: 姓名→userInfo.realName, 金额→loanInfo.amount, 手机→userInfo.mobile, 证件号→userInfo.idNo/idType, 银行卡→paymentData.*
 - 只有两个transform: formatAmount(金额字段,如applyAmount/amount), nowDate(日期字段)
 - 大部分字段transform为null,表示直接透传
-- confidence: 精确匹配=0.95, 语义推断=0.85, 模糊=0.70
+- **数据源字段必须来自目录**: source_path 的每一级（含嵌套字段）都必须在上方 ## 可用数据源字段 列表中能找到。严禁编造 repayData、feeDetail、repayType、repayAmount 等目录中不存在的路径。找不到完全匹配的字段时 source_path 输出 ""，走 TODO 占位
+- **嵌套对象展开**: 接口文档中的嵌套对象(如 repayAccount 包含 bankCode/bankName 等子字段)，必须在 field_mappings 中逐一展开为独立映射，fund_field 用点号连接: "repayAccount.bankCode"、"repayAccount.bankName"……严禁将整个对象映射为一个字段(如 fund_field="repayAccount", source_path="paymentData")
+- **数组路径**: 文档中的数组字段展开时用 [] 标记，如 repayPeriods[].startDate
+- **找不到匹配内部数据源的字段**: source_path 输出空字符串 ""，remark 标注 "TODO:需人工确认映射"，严禁跳过该字段或编造 source_path
+- confidence: 精确匹配=0.95, 语义推断=0.85, 模糊=0.70, 无匹配(sourcePath为空)=0.0
 - fund_field必须来自接口文档字段名
 
 ### flow_dsl

@@ -44,15 +44,33 @@ fundlink:
         output-price: 0.008
       siliconflow:
         base-url: https://api.siliconflow.cn/v1
-        api-key: ${SILICONFLOW_API_KEY:sk-wzabjteielnrnyrjyskxxjnvetqwxpbapkohavopptciqvxq}
+        api-key: ${SILICONFLOW_API_KEY:}
         default-model: Qwen/Qwen3-8B
         input-price: 0          # 免费模型
         output-price: 0
+    # LLM 调用通用配置
+    connect-timeout-seconds: 30      # HTTP 连接超时
+    request-timeout-minutes: 10      # 单次请求超时
+
     # 路由策略
     router:
-      default-provider: siliconflow
-      fallback-chain: siliconflow,qwen,deepseek
+      default-provider: qwen
+      default-model: qwen-plus
+      fallback-chain: qwen,siliconflow,deepseek
       retry-max: 2
+      task-routing:
+        simple:
+          provider: siliconflow
+          model: Qwen/Qwen3-8B
+        requirement:
+          provider: qwen
+          model: qwen-plus
+        testgen:
+          provider: qwen
+          model: qwen-plus
+        diagnosis:
+          provider: siliconflow
+          model: Qwen/Qwen3-8B
 
   # RAG 服务地址
   rag:
@@ -60,6 +78,15 @@ fundlink:
   # FundLink 服务地址（调现有 API 写入配置）
   admin:
     base-url: http://localhost:8080
+  # Agent Loop 闭环配置
+  loop:
+    max-rounds: 3                   # 最大重试轮数
+    decision-timeout-minutes: 10    # 人工决策等待超时
+
+  # SSE 流式推送配置
+  sse:
+    timeout-ms: 3600000     # SseEmitter 超时 2h（对齐 LLM 20min + fallback chain + 决策等待）
+    heartbeat-ms: 25000     # 心跳间隔 25s（防止浏览器/proxy 断连）
 
 logging:
   level:

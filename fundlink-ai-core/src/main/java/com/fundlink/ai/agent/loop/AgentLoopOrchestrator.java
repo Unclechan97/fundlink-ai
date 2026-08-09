@@ -12,6 +12,7 @@ import com.fundlink.ai.entity.AiTask;
 import com.fundlink.ai.gateway.TokenUsage;
 import com.fundlink.ai.mapper.AiTaskMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -23,6 +24,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Agent Loop 编排器 — 状态机 + SSE 推送 + 重试控制 (设计 §3)
@@ -43,17 +45,23 @@ public class AgentLoopOrchestrator {
     private final AiTaskMapper taskMapper;
     private final LoopEventPublisher eventPublisher;
     private final ObjectMapper json = new ObjectMapper();
+    private final int defaultMaxRounds;
+    private final int decisionTimeoutMinutes;
 
     /** 等待人工决策的 CompletableFuture */
     private final Map<Long, CompletableFuture<DecisionRequest>> pendingDecisions = new ConcurrentHashMap<>();
     /** 运行中的 LoopState */
     private final Map<Long, LoopState> runningStates = new ConcurrentHashMap<>();
+    /** 取消标记 — 用户中断时设为 true */
+    private final Map<Long, AtomicBoolean> cancelFlags = new ConcurrentHashMap<>();
 
     public AgentLoopOrchestrator(RequirementAgent requirementAgent, ConfigWriter configWriter,
                                   TemplateValidator templateValidator, FlowDryRunner flowDryRunner,
                                   TestGenAgent testGenAgent, DiagnosisAgent diagnosisAgent,
                                   LoopTracer loopTracer, AiTaskMapper taskMapper,
-                                  LoopEventPublisher eventPublisher) {
+                                  LoopEventPublisher eventPublisher,
+                                  @Value("${fundlink.loop.max-rounds:3}") int defaultMaxRounds,
+                                  @Value("${fundlink.loop.decision-timeout-minutes:10}") int decisionTimeoutMinutes) {
         this.requirementAgent = requirementAgent;
         this.configWriter = configWriter;
         this.templateValidator = templateValidator;
@@ -63,6 +71,8 @@ public class AgentLoopOrchestrator {
         this.loopTracer = loopTracer;
         this.taskMapper = taskMapper;
         this.eventPublisher = eventPublisher;
+        this.defaultMaxRounds = defaultMaxRounds;
+        this.decisionTimeoutMinutes = decisionTimeoutMinutes;
     }
 
     /** 启动闭环 — @Async 异步执行 */
@@ -85,11 +95,12 @@ public class AgentLoopOrchestrator {
         s.providerCode = task.getProviderCode();
         s.flowType = task.getFlowType() != null ? task.getFlowType() : "LOAN";
         s.round = task.getCurrentRound() != null ? task.getCurrentRound() : 0;
-        s.maxRounds = task.getMaxRounds() != null ? task.getMaxRounds() : 3;
+        s.maxRounds = task.getMaxRounds() != null ? task.getMaxRounds() : defaultMaxRounds;
         s.phase = TaskPhase.ANALYZE;
         s.previousErrors = new ArrayList<>();
 
         runningStates.put(taskId, s);
+        cancelFlags.put(taskId, new AtomicBoolean(false));
 
         // Update task status
         task.setStatus("ANALYZE");
@@ -110,10 +121,30 @@ public class AgentLoopOrchestrator {
         }
     }
 
+    /** 用户中断任务 — 设置取消标记，解除决策阻塞 */
+    public void cancel(Long taskId) {
+        log.info("[LOOP] Cancel requested  task={}", taskId);
+        AtomicBoolean flag = cancelFlags.get(taskId);
+        if (flag != null) {
+            flag.set(true);
+        }
+        // 如果正在等待决策 → 解除阻塞
+        CompletableFuture<DecisionRequest> future = pendingDecisions.get(taskId);
+        if (future != null) {
+            future.cancel(true);
+        }
+    }
+
+    private boolean isCancelled(Long taskId) {
+        AtomicBoolean flag = cancelFlags.get(taskId);
+        return flag != null && flag.get();
+    }
+
     // -- state machine --
 
     private void runLoop(LoopState s) {
-        while (s.phase != TaskPhase.PUBLISHED && s.phase != TaskPhase.FAILED) {
+        while (s.phase != TaskPhase.PUBLISHED && s.phase != TaskPhase.FAILED
+                && !isCancelled(s.taskId)) {
             try {
                 switch (s.phase) {
                     case ANALYZE -> doAnalyze(s);
@@ -134,8 +165,19 @@ public class AgentLoopOrchestrator {
         }
 
         // Cleanup
+        if (isCancelled(s.taskId)) {
+            log.info("[LOOP] Task cancelled by user  task={}", s.taskId);
+            AiTask task = taskMapper.selectById(s.taskId);
+            if (task != null) {
+                task.setStatus("ABORTED");
+                task.setUpdateTime(LocalDateTime.now());
+                taskMapper.updateById(task);
+            }
+            eventPublisher.taskFailed(s.taskId, "用户中断", s.round + 1);
+        }
         runningStates.remove(s.taskId);
         pendingDecisions.remove(s.taskId);
+        cancelFlags.remove(s.taskId);
     }
 
     private void doAnalyze(LoopState s) {
@@ -158,6 +200,13 @@ public class AgentLoopOrchestrator {
         }
 
         s.currentResult = result;
+
+        // LLM 解析阶段自动识别的 flowType 覆盖预检测值
+        if (result.getFlowType() != null && !result.getFlowType().equalsIgnoreCase(s.flowType)) {
+            log.info("[LOOP] flowType updated by LLM  {} -> {}  task={}",
+                    s.flowType, result.getFlowType(), s.taskId);
+            s.flowType = result.getFlowType().toUpperCase();
+        }
 
         // Write config to FundLink
         ConfigWriter.WriteResult write = configWriter.writeAll(result, s.providerCode, s.flowType);
@@ -257,16 +306,14 @@ public class AgentLoopOrchestrator {
         TestGenResult tg = s.testGen;
         if (tg == null) {
             s.lastError = "Missing TestGen result — skipping DRYRUN";
-            s.phase = TaskPhase.DECISION_POINT;
-            s.decisionType = "PUBLISH_CONFIRM";
+            s.phase = TaskPhase.DIAGNOSE;
             return;
         }
 
         Long flowId = s.writeResult.getFlowId();
         if (flowId == null || flowId == 0) {
             s.lastError = "Missing flowId — skipping DRYRUN";
-            s.phase = TaskPhase.DECISION_POINT;
-            s.decisionType = "PUBLISH_CONFIRM";
+            s.phase = TaskPhase.DIAGNOSE;
             return;
         }
 
@@ -341,13 +388,18 @@ public class AgentLoopOrchestrator {
                 diag.getRootCause(), null, duration, true, null);
 
         if (s.round < s.maxRounds - 1) {
-            // Retry available
-            s.decisionType = "RECOVERY";
-        } else {
-            // Max rounds exhausted
-            s.decisionType = "RECOVERY_EXHAUSTED";
+            // Auto-retry — don't go to decision point
+            log.info("[LOOP] Auto-retry  task={}  round={} -> {}", s.taskId, s.round, s.round + 1);
+            s.round++;
+            s.previousErrors.add(s.lastDiagnosis != null
+                    ? s.lastDiagnosis : createErrorDiag(s.lastError));
+            s.phase = TaskPhase.ANALYZE;
+            persistTask(s, "ANALYZE");
+            eventPublisher.phaseStart(s.taskId, "ANALYZE", s.round + 1, s.maxRounds);
+            return;
         }
-
+        // Max rounds exhausted
+        s.decisionType = "RECOVERY_EXHAUSTED";
         s.phase = TaskPhase.DECISION_POINT;
     }
 
@@ -365,11 +417,7 @@ public class AgentLoopOrchestrator {
             summary = d != null && d.getRootCause() != null
                     ? d.getRootCause() + " → " + (d.getFixSuggestion() != null ? d.getFixSuggestion() : "")
                     : "验证失败: " + (s.lastError != null ? s.lastError : "未知错误");
-            if (s.round >= s.maxRounds - 1) {
-                options = List.of("SKIP", "EDIT_AND_RETRY", "ABORT");
-            } else {
-                options = List.of("RETRY", "SKIP", "EDIT_AND_RETRY", "ABORT");
-            }
+            options = List.of("SKIP", "EDIT_AND_RETRY", "ABORT");
         }
 
         persistTask(s, "DECISION_POINT");
@@ -381,7 +429,7 @@ public class AgentLoopOrchestrator {
 
         DecisionRequest decision;
         try {
-            decision = future.get(10, TimeUnit.MINUTES); // 10 min timeout
+            decision = future.get(decisionTimeoutMinutes, TimeUnit.MINUTES);
         } catch (Exception e) {
             log.warn("[LOOP] Decision timeout for task {}", s.taskId);
             decision = new DecisionRequest();

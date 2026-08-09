@@ -1,5 +1,6 @@
 package com.fundlink.ai.controller;
 
+import com.fundlink.ai.agent.FlowTypeDetector;
 import com.fundlink.ai.agent.loop.AgentLoopOrchestrator;
 import com.fundlink.ai.agent.loop.DecisionRequest;
 import com.fundlink.ai.entity.AiTask;
@@ -33,11 +34,13 @@ public class LoopController {
         task.setTaskNo("LOOP-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
         task.setTaskType("LOOP");
         task.setStatus("PENDING");
-        task.setFlowType(req.getFlowType() != null ? req.getFlowType() : "LOAN");
+        task.setFlowType(req.getFlowType() != null && !req.getFlowType().isBlank()
+                ? req.getFlowType().toUpperCase()
+                : FlowTypeDetector.detect(req.getDocumentText(), null));
         task.setProviderCode(req.getProviderCode());
         task.setDocumentText(req.getDocumentText());
         task.setCurrentRound(0);
-        task.setMaxRounds(3);
+        task.setMaxRounds(req.getMaxRounds() != null ? req.getMaxRounds() : 3);
         task.setCreateTime(LocalDateTime.now());
         task.setUpdateTime(LocalDateTime.now());
         taskMapper.insert(task);
@@ -77,6 +80,13 @@ public class LoopController {
         req.setTaskId(taskId);
         orchestrator.decide(taskId, req);
         return CopilotController.ApiAiResponse.success(Map.of("taskId", taskId, "decision", req.getDecision()));
+    }
+
+    /** 用户中断正在执行的任务 */
+    @PostMapping("/{taskId}/cancel")
+    public CopilotController.ApiAiResponse<Map<String, Object>> cancel(@PathVariable Long taskId) {
+        orchestrator.cancel(taskId);
+        return CopilotController.ApiAiResponse.success(Map.of("taskId", taskId, "status", "CANCELLED"));
     }
 
     /** Task status query */
@@ -122,6 +132,7 @@ public class LoopController {
         private String documentText;
         private String providerCode;
         private String flowType;
+        private Integer maxRounds;
 
         public String getDocumentText() { return documentText; }
         public void setDocumentText(String d) { this.documentText = d; }
@@ -129,5 +140,7 @@ public class LoopController {
         public void setProviderCode(String p) { this.providerCode = p; }
         public String getFlowType() { return flowType; }
         public void setFlowType(String f) { this.flowType = f; }
+        public Integer getMaxRounds() { return maxRounds; }
+        public void setMaxRounds(Integer r) { this.maxRounds = r; }
     }
 }

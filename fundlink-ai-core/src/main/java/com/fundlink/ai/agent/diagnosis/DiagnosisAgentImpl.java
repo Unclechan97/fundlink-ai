@@ -73,6 +73,15 @@ public class DiagnosisAgentImpl implements DiagnosisAgent {
         }
         r.setCauseChain(chain);
 
+        // Rule: field completeness — missing fields in mapping
+        if (error.contains("字段缺少映射") || error.contains("FieldCompletenessGuard")) {
+            chain.add("接口字段未全部映射");
+            r.setRootCause("接口文档中的字段未全部出现在 field_mappings 中，模板将遗漏这些字段");
+            r.setFixSuggestion("检查接口文档中所有字段是否都有映射；找不到匹配数据源的字段：sourcePath 留空，remark 标注 TODO，模板中会以空字符串占位");
+            r.setConfidence(0.92);
+            return r;
+        }
+
         // Rule: FreeMarker undefined variable — pattern: "undefined variable xxx"
         java.util.regex.Matcher fmMatcher = java.util.regex.Pattern
                 .compile("undefined variable[:\s]+(\\S+)", java.util.regex.Pattern.CASE_INSENSITIVE)

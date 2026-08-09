@@ -99,12 +99,22 @@ public class TemplateValidator {
                         "Template render error code 50002", renderResult);
             }
 
-            // 3. 检查所有映射字段存在于渲染结果
+            // 3. 检查有 sourcePath 的字段存在于渲染结果
+            // 空 sourcePath 的字段是 TODO 占位，不检查（空数组中不会展开）
             List<String> missingFields = new ArrayList<>();
             if (fieldMappings != null) {
                 for (FieldMappingSuggestion m : fieldMappings) {
-                    if (m.getFundField() != null && !renderResult.contains("\"" + m.getFundField() + "\"")) {
-                        missingFields.add(m.getFundField());
+                    String fundField = m.getFundField();
+                    if (fundField == null) continue;
+                    // 占位字段 — 跳过检查（模板中可能为空数组或被省略）
+                    if (m.getSourcePath() == null || m.getSourcePath().isBlank()) continue;
+                    // 提取叶子名: "repayAccount.bankCode" → "bankCode"; "repayPeriods[].periodNo" → "periodNo"
+                    String leafName = fundField.contains(".")
+                            ? fundField.substring(fundField.lastIndexOf('.') + 1)
+                            : fundField;
+                    leafName = leafName.replace("[]", "");
+                    if (!renderResult.contains("\"" + leafName + "\"")) {
+                        missingFields.add(fundField);
                     }
                 }
             }

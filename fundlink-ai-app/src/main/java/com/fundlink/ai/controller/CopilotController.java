@@ -1,6 +1,7 @@
 package com.fundlink.ai.controller;
 
 import com.fundlink.ai.agent.ConfigWriter;
+import com.fundlink.ai.agent.FlowTypeDetector;
 import com.fundlink.ai.agent.requirement.FieldMappingSuggestion;
 import com.fundlink.ai.agent.requirement.RequirementAgent;
 import com.fundlink.ai.agent.requirement.RequirementResult;
@@ -26,7 +27,7 @@ public class CopilotController {
      */
     @PostMapping("/analyze")
     public ApiAiResponse<RequirementResult> analyze(@RequestBody AnalyzeRequest req) {
-        String ft = req.getFlowType() != null ? req.getFlowType() : "LOAN";
+        String ft = FlowTypeDetector.detect(req.getDocumentText(), req.getFlowType());
         RequirementResult result = requirementAgent.analyze(
                 req.getDocumentText(), req.getProviderCode(), ft, null);
         if (result.getParseError() != null) {
@@ -51,7 +52,7 @@ public class CopilotController {
      */
     @PostMapping("/suggest-mappings")
     public ApiAiResponse<List<Map<String, Object>>> suggestMappings(@RequestBody AnalyzeRequest req) {
-        String ft = req.getFlowType() != null ? req.getFlowType() : "LOAN";
+        String ft = FlowTypeDetector.detect(req.getDocumentText(), req.getFlowType());
         RequirementResult result = requirementAgent.analyze(
                 req.getDocumentText(), req.getProviderCode(), ft, null);
 

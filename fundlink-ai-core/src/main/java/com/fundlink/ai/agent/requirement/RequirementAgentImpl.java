@@ -2,6 +2,7 @@ package com.fundlink.ai.agent.requirement;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fundlink.ai.agent.FlowTypeDetector;
 import com.fundlink.ai.agent.PromptBuilder;
 import com.fundlink.ai.agent.PromptEnhancer;
 import com.fundlink.ai.gateway.LlmGateway;
@@ -17,6 +18,8 @@ import java.util.*;
 @Slf4j
 @Component
 public class RequirementAgentImpl implements RequirementAgent {
+
+    private static final Set<String> VALID_FLOW_TYPES = Set.of("LOAN", "CREDIT", "REPAY");
 
     private final LlmGateway llmGateway;
     private final PromptBuilder promptBuilder;
@@ -34,9 +37,12 @@ public class RequirementAgentImpl implements RequirementAgent {
     public RequirementResult analyze(String documentText, String providerCode, String flowType,
                                       List<DiagnosisResult> previousErrors) {
         String traceId = "req-" + UUID.randomUUID().toString().substring(0, 8);
-        String ft = flowType != null ? flowType.toLowerCase() : "loan";
-        log.info("[REQ-AGENT] Start  traceId={}  provider={}  flowType={}  docLen={}",
-                traceId, providerCode, ft, documentText.length());
+        // 自动检测 flowType（用户未选定时）
+        String detected = FlowTypeDetector.detect(documentText, flowType);
+        String ft = detected.toLowerCase();
+        boolean autoDetected = flowType == null || flowType.isBlank();
+        log.info("[REQ-AGENT] Start  traceId={}  provider={}  flowType={}  autoDetected={}  docLen={}",
+                traceId, providerCode, detected, autoDetected, documentText.length());
 
         // 1. RAG 检索历史案例
         List<String> ragExamples = enhancer.search(ft + " 字段映射 流程配置 " + providerCode);
@@ -58,6 +64,16 @@ public class RequirementAgentImpl implements RequirementAgent {
 
         // 4. 安全解析
         RequirementResult result = parseSafely(response.getContent());
+
+        // 5. 字段完整性检查 — 接口文档中的所有字段都必须有映射
+        if (result.getParseError() == null) {
+            List<String> missing = FieldCompletenessGuard.missingFields(result);
+            if (!missing.isEmpty()) {
+                result.setParseError("字段缺少映射: " + String.join(", ", missing));
+                log.error("[REQ-AGENT] Field completeness failed  traceId={}  missing={}",
+                        traceId, missing);
+            }
+        }
 
         if (result.getParseError() != null) {
             log.error("[REQ-AGENT] Analysis completed with parse error  traceId={}  error={}",
@@ -127,6 +143,13 @@ public class RequirementAgentImpl implements RequirementAgent {
 
             JsonNode root = json.readTree(raw);
 
+            // flow_type — LLM 解析阶段自动识别
+            String ftOut = root.path("flow_type").asText(null);
+            if (ftOut != null && !ftOut.isBlank()) {
+                String normalized = ftOut.toUpperCase().trim();
+                result.setFlowType(VALID_FLOW_TYPES.contains(normalized) ? normalized : null);
+            }
+
             // provider_config
             JsonNode pc = root.path("provider_config");
             if (!pc.isMissingNode()) {
@@ -166,25 +189,33 @@ public class RequirementAgentImpl implements RequirementAgent {
                     var fm = new FieldMappingSuggestion();
                     String fundField = m.path("fund_field").asText(null);
                     String sourcePath = m.path("source_path").asText(null);
+                    String transform = m.path("transform").asText(null);
+                    // 防 LLM 输出字符串 "null" — Jackson 对此返回 Java 字符串 "null" 而非 null
+                    if (sourcePath != null && "null".equalsIgnoreCase(sourcePath.trim())) sourcePath = null;
+                    if (transform != null && "null".equalsIgnoreCase(transform.trim())) transform = null;
                     fm.setFundField(fundField);
-                    fm.setSourcePath(sourcePath);
-                    fm.setTransform(m.path("transform").asText(null));
+                    // 找不到数据源时为 "" (正常情况，Template 中用 "" 占位)
+                    fm.setSourcePath(sourcePath != null ? sourcePath : "");
+                    fm.setTransform(transform);
                     fm.setConfidence(m.path("confidence").asDouble(0.8));
-                    // 跳过无效映射
-                    if (fundField == null || sourcePath == null) {
-                        log.warn("[REQ-AGENT] Skipping mapping with null field: fundField={} sourcePath={}",
-                                fundField, sourcePath);
+                    fm.setRemark(m.path("remark").asText(null));
+                    // 跳过只有 fundField 为空的无效映射（sourcePath 为空是合法的 TODO 行）
+                    if (fundField == null || fundField.isBlank()) {
+                        log.warn("[REQ-AGENT] Skipping mapping with blank fundField");
                         continue;
                     }
-                    // 检测 sourcePath 截断 (project_status 6.7)
-                    if (!sourcePath.contains(".") && !sourcePath.matches("^[a-zA-Z]+$")) {
-                        log.warn("[REQ-AGENT] Suspected truncated sourcePath: '{}' (fundField={})",
-                                sourcePath, fundField);
-                    }
-                    // 校验 sourcePath 仅含合法字符
-                    if (!sourcePath.matches("^[a-zA-Z][a-zA-Z0-9]*(\\.[a-zA-Z][a-zA-Z0-9]*)*$")) {
-                        log.warn("[REQ-AGENT] Invalid sourcePath format: '{}' (fundField={})",
-                                sourcePath, fundField);
+                    // sourcePath 为空时跳过格式校验（标记字段，无需校验）
+                    if (sourcePath != null && !sourcePath.isBlank()) {
+                        // 检测 sourcePath 截断 (project_status 6.7)
+                        if (!sourcePath.contains(".") && !sourcePath.matches("^[a-zA-Z]+$")) {
+                            log.warn("[REQ-AGENT] Suspected truncated sourcePath: '{}' (fundField={})",
+                                    sourcePath, fundField);
+                        }
+                        // 校验 sourcePath 仅含合法字符
+                        if (!sourcePath.matches("^[a-zA-Z][a-zA-Z0-9]*(\\.[a-zA-Z][a-zA-Z0-9]*)*$")) {
+                            log.warn("[REQ-AGENT] Invalid sourcePath format: '{}' (fundField={})",
+                                    sourcePath, fundField);
+                        }
                     }
                     list.add(fm);
                 }

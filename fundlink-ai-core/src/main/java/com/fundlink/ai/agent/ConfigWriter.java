@@ -94,14 +94,24 @@ public class ConfigWriter {
     private Long getOrCreateTemplate(List<FieldMappingSuggestion> mappings,
                                       String providerCode, Long providerId) throws Exception {
         String templateCode = "AI_" + providerCode;
+        String content = buildFreeMarker(mappings);
+        log.info("[WRITE] Template content: {}", content.replaceAll("\\s+", " "));
+
         Long existing = findTemplateByCode(templateCode);
         if (existing != null) {
-            log.info("[WRITE] Template exists code={} id={}", templateCode, existing);
+            log.info("[WRITE] Template exists code={} id={} — updating content", templateCode, existing);
+            // PUT 更新 content，防止上一轮的 marker 或遗漏字段永久残留
+            Map<String, Object> updateBody = new LinkedHashMap<>();
+            updateBody.put("templateCode", templateCode);
+            updateBody.put("templateName", providerCode + " AI生成模板");
+            updateBody.put("templateType", "REQUEST");
+            updateBody.put("providerId", providerId);
+            updateBody.put("content", content);
+            String path = "/api/admin/templates/" + existing;
+            put(path, updateBody);
             return existing;
         }
 
-        String content = buildFreeMarker(mappings);
-        log.info("[WRITE] Template content: {}", content.replaceAll("\\s+", " "));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("templateCode", templateCode);
         body.put("templateName", providerCode + " AI生成模板");
@@ -128,24 +138,189 @@ public class ConfigWriter {
         List<FieldMappingSuggestion> valid = new ArrayList<>();
         if (mappings != null) {
             for (FieldMappingSuggestion m : mappings) {
-                if (m.getFundField() != null && !m.getFundField().isBlank()) valid.add(m);
+                String f = m.getFundField();
+                if (f != null && !f.isBlank() && !"null".equalsIgnoreCase(f.trim())) valid.add(m);
             }
         }
-        StringBuilder content = new StringBuilder("{\n");
-        for (int i = 0; i < valid.size(); i++) {
-            FieldMappingSuggestion m = valid.get(i);
-            String name = m.getFundField();
-            String comma = (i < valid.size() - 1) ? "," : "";
-            String sp = m.getSourcePath() != null ? m.getSourcePath() : name;
-            String tf = m.getTransform();
-            if (tf != null && !tf.isBlank()) {
-                content.append("  \"").append(name).append("\": \"${").append(tf).append("(").append(sp).append(")}\"").append(comma).append("\n");
-            } else {
-                content.append("  \"").append(name).append("\": \"${").append(sp).append("}\"").append(comma).append("\n");
-            }
-        }
-        content.append("}");
+
+        // 构建嵌套树（支持点号路径和数组路径）
+        JsonNode root = buildTree(valid);
+        StringBuilder content = new StringBuilder();
+        writeNode(content, null, root, 0);
         return content.toString();
+    }
+
+    // ── 嵌套 JSON 树构建 ──
+
+    private static class JsonNode {
+        String leafExpr;                         // 叶子节点: FreeMarker 表达式
+        boolean isArray;                         // 数组节点
+        String listSource;                       // 数组数据源路径 (如 loanInfo.repayPeriods)
+        Map<String, JsonNode> children;          // 对象节点: 子字段
+
+        JsonNode leaf(String expr) { this.leafExpr = expr; return this; }
+        JsonNode object() { this.children = new LinkedHashMap<>(); return this; }
+    }
+
+    /** 将字段映射列表转为嵌套树 */
+    private JsonNode buildTree(List<FieldMappingSuggestion> mappings) {
+        JsonNode root = new JsonNode();
+        root.children = new LinkedHashMap<>();
+
+        for (FieldMappingSuggestion m : mappings) {
+            String name = m.getFundField();
+            String rawSp = m.getSourcePath();
+            boolean hasSp = rawSp != null && !rawSp.isBlank()
+                    && !"null".equalsIgnoreCase(rawSp.trim());
+            String sp = hasSp ? rawSp : null;
+            String tf = m.getTransform();
+            boolean hasTf = tf != null && !tf.isBlank()
+                    && !"null".equalsIgnoreCase(tf.trim());
+
+            // 构建 FreeMarker 表达式 — 去掉 source_path 中的 []（<#list> 已由树结构处理）
+            String expr;
+            if (sp == null) {
+                expr = "\"\"";  // 无匹配 → 空字符串占位
+                log.warn("[WRITE] Unmapped field: {} — using empty placeholder (TODO)", name);
+            } else {
+                String cleanSp = sp.replace("[]", "").replace("..", ".");
+                if (hasTf) {
+                    expr = "\"${" + tf + "(" + cleanSp + ")}\"";
+                } else {
+                    expr = "\"${" + cleanSp + "}\"";
+                }
+            }
+
+            // 解析路径: "a.b.c" → ["a","b","c"]; "arr[].x" → ["arr","[]","x"]
+            List<String> path = parsePath(name);
+            insertTree(root, path, 0, expr, hasSp ? rawSp : null);
+        }
+        return root;
+    }
+
+    /** 解析 fundField 路径: "repayAccount.bankCode" → ["repayAccount","bankCode"] */
+    private List<String> parsePath(String fundField) {
+        List<String> segments = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (int i = 0; i < fundField.length(); i++) {
+            char c = fundField.charAt(i);
+            if (c == '.') {
+                if (current.length() > 0) { segments.add(current.toString()); current.setLength(0); }
+            } else if (c == '[') {
+                // "arr[].x" → push "arr", then "[]"
+                if (current.length() > 0) { segments.add(current.toString()); current.setLength(0); }
+                // consume until ']'
+                while (i < fundField.length() && fundField.charAt(i) != ']') i++;
+                segments.add("[]");  // marker for array element
+            } else {
+                current.append(c);
+            }
+        }
+        if (current.length() > 0) segments.add(current.toString());
+        return segments;
+    }
+
+    /** 递归插入路径到树，rawSp 为原始 source_path（用于提取数组数据源变量名） */
+    private void insertTree(JsonNode node, List<String> path, int idx, String expr, String rawSp) {
+        if (idx >= path.size()) return;
+        String seg = path.get(idx);
+
+        if ("[]".equals(seg)) {
+            // 数组节点 — 从 source_path 提取列表变量名
+            if (node.children == null) { node.children = new LinkedHashMap<>(); }
+            node.isArray = true;
+            if (node.listSource == null && rawSp != null) {
+                node.listSource = extractListSource(rawSp);
+            }
+            JsonNode child = node.children.computeIfAbsent("[]", k -> new JsonNode().object());
+            insertTree(child, path, idx + 1, expr, rawSp);
+        } else if (idx == path.size() - 1) {
+            // 叶子
+            if (node.children == null) node.children = new LinkedHashMap<>();
+            node.children.put(seg, new JsonNode().leaf(expr));
+        } else {
+            // 中间节点
+            if (node.children == null) node.children = new LinkedHashMap<>();
+            JsonNode child = node.children.computeIfAbsent(seg, k -> new JsonNode().object());
+            insertTree(child, path, idx + 1, expr, rawSp);
+        }
+    }
+
+    /** 从 source_path 提取列表变量名: "loanInfo.repayPeriods[].periodNo" → "loanInfo.repayPeriods" */
+    private String extractListSource(String rawSp) {
+        // 找到 [] 的位置，往前到上一个 . 或开头
+        int bracket = rawSp.indexOf("[]");
+        if (bracket < 0) return null;
+        String prefix = rawSp.substring(0, bracket);
+        // 去掉末尾可能残留的 .
+        if (prefix.endsWith(".")) prefix = prefix.substring(0, prefix.length() - 1);
+        return prefix;
+    }
+
+    /** 递归输出 JSON 字符串 */
+    private void writeNode(StringBuilder sb, String fieldName, JsonNode node, int indent) {
+        String pad = "  ".repeat(indent);
+        if (node.leafExpr != null) {
+            // 叶子 — 不需要递归，由父级输出 key: value
+            sb.append(node.leafExpr);
+        } else if (node.isArray && node.children != null) {
+            JsonNode item = node.children.get("[]");
+            // 所有子字段都无数据源 → 空数组
+            if (allEmpty(item)) {
+                sb.append("[]");
+            } else {
+                String listVar = node.listSource != null ? node.listSource : (fieldName != null ? fieldName : "items");
+                sb.append("[\n");
+                sb.append(pad).append("  <#list ").append(listVar).append(" as item>\n");
+                sb.append(pad).append("    {\n");
+                writeChildren(sb, item, indent + 3);
+                sb.append(pad).append("    }\n");
+                sb.append(pad).append("    <#sep>,\n");
+                sb.append(pad).append("  </#list>\n");
+                sb.append(pad).append("]");
+            }
+        } else if (node.children != null) {
+            // 对象
+            sb.append("{\n");
+            writeChildren(sb, node, indent + 1);
+            sb.append(pad).append("}");
+        }
+    }
+
+    /** 递归检查子树中所有叶子是否都是空占位符 */
+    private boolean allEmpty(JsonNode node) {
+        if (node.leafExpr != null) {
+            return "\"\"".equals(node.leafExpr);
+        }
+        if (node.children != null) {
+            for (JsonNode child : node.children.values()) {
+                if (!allEmpty(child)) return false;
+            }
+            return true;
+        }
+        return true;
+    }
+
+    private void writeChildren(StringBuilder sb, JsonNode node, int indent) {
+        String pad = "  ".repeat(indent);
+        int count = 0, total = node.children.size();
+        for (Map.Entry<String, JsonNode> e : node.children.entrySet()) {
+            count++;
+            String comma = count < total ? "," : "";
+            String key = e.getKey();
+            JsonNode child = e.getValue();
+
+            if (child.leafExpr != null) {
+                // 简单字段
+                sb.append(pad).append("\"").append(key).append("\": ").append(child.leafExpr).append(comma).append("\n");
+            } else {
+                // 嵌套对象/数组 — 写 key: 后递归
+                sb.append(pad).append("\"").append(key).append("\": ");
+                writeNode(sb, key, child, indent);
+                if (comma.equals(",")) sb.append(comma);
+                sb.append("\n");
+            }
+        }
     }
 
     // ── Mappings（幂等：先删后建）──
@@ -185,7 +360,9 @@ public class ConfigWriter {
 
     // ── Flow（幂等：先查后建）──
     private Long getOrCreateFlow(FlowDsl dsl, ProviderConfig cfg, String code, String type, Long pid) throws Exception {
-        String flowCode = type + "_" + code;  // 匹配上游 flowType_providerCode
+        // REPAY→REPAYMENT 规范化 (FundLink 侧 FlowType 枚举为 REPAYMENT)
+        String fundLinkType = "REPAY".equalsIgnoreCase(type) ? "REPAYMENT" : (type != null ? type : "LOAN");
+        String flowCode = fundLinkType + "_" + code;  // 匹配上游 flowType_providerCode
         Long existing = findFlowByCode(flowCode);
         if (existing != null) {
             log.info("[WRITE] Flow exists code={} id={}", flowCode, existing);
@@ -199,7 +376,7 @@ public class ConfigWriter {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("flowCode", flowCode);
         body.put("flowName", code + " AI生成流程");
-        body.put("flowType", type);
+        body.put("flowType", fundLinkType);
         body.put("providerId", pid);
         body.put("graphData", json.writeValueAsString(graphData));
         Map<String, Object> resp = post("/api/admin/flows", body);
@@ -299,6 +476,24 @@ public class ConfigWriter {
         URI uri = new URI(fundlinkUrl + path);
         HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
         conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(10000);
+        conn.setReadTimeout(15000);
+        String b = json.writeValueAsString(body);
+        try (OutputStream os = conn.getOutputStream()) { os.write(b.getBytes(StandardCharsets.UTF_8)); }
+        if (conn.getResponseCode() >= 400) {
+            String err = new String(conn.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+            throw new RuntimeException("FundLink API error " + conn.getResponseCode() + ": " + err);
+        }
+        return json.readValue(conn.getInputStream(), Map.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> put(String path, Object body) throws Exception {
+        URI uri = new URI(fundlinkUrl + path);
+        HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
+        conn.setRequestMethod("PUT");
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setDoOutput(true);
         conn.setConnectTimeout(10000);

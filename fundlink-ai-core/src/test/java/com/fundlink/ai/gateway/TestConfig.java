@@ -19,8 +19,47 @@ public class TestConfig {
         return new SyncTaskExecutor();
     }
 
-    /** 测试用 Fake Provider — 替代真实 QwenProvider */
+    /** 测试用 SiliconFlow Fake Provider — 替代真实 OpenAiCompatibleProvider */
     @Primary
+    @Bean("siliconflow")
+    public LlmProvider testSiliconFlowProvider() {
+        return new LlmProvider() {
+            @Override public String name() { return "siliconflow"; }
+            @Override public boolean supports(String m) { return true; }
+            @Override
+            public LlmResponse chat(LlmRequest req) {
+                // 通用 JSON — requirement + testgen 字段都包含，各 Parser 取自己需要的
+                String content = """
+                    {
+                      "provider_config":{"providerName":"测试银行","baseUrl":"http://test-bank/api"},
+                      "interface_schema": {"endpoint":"POST /loan/apply","fields":[
+                        {"name":"loanNo","type":"String","required":true,"description":"贷款编号"},
+                        {"name":"amount","type":"BigDecimal","required":true,"description":"贷款金额"},
+                        {"name":"customerId","type":"String","required":true,"description":"客户ID"},
+                        {"name":"customerName","type":"String","required":true,"description":"客户姓名"}
+                      ]},
+                      "field_mappings": [
+                        {"fund_field":"loanNo","source_path":"loanInfo.loanNo","transform":null,"confidence":0.95},
+                        {"fund_field":"amount","source_path":"loanInfo.amount","transform":"formatAmount","confidence":0.90},
+                        {"fund_field":"customerId","source_path":"userInfo.idNo","transform":null,"confidence":0.70},
+                        {"fund_field":"customerName","source_path":"userInfo.realName","transform":null,"confidence":0.95}
+                      ],
+                      "flow_dsl": {
+                        "nodes":[{"id":"n1","type":"START"},{"id":"n2","type":"DATA_COLLECT"},{"id":"n3","type":"TEMPLATE_RENDER"},{"id":"nc","type":"CONDITION"},{"id":"n4","type":"SEND_TO_FUND"},{"id":"n5","type":"END"}],
+                        "edges":[{"id":"e1","source":"n1","target":"n2"},{"id":"e2","source":"n2","target":"n3"},{"id":"e3","source":"n3","target":"nc"},{"id":"ec1","source":"nc","target":"n4","conditionExpr":"#root.riskData.level == 'A'"},{"id":"ec2","source":"nc","target":"n5","conditionExpr":"#root.riskData.level != 'A'"}]
+                      },
+                      "previewData":{"userInfo":{"realName":"测试"},"loanInfo":{"loanNo":"LN001","amount":50000},"riskData":{"score":85,"level":"A"}},
+                      "testCases":[
+                        {"name":"A级-正常","targetBranch":"ec1","scenarioType":"NORMAL","inputData":{"loanNo":"LN001","amount":50000},"expectedContextKeys":{"riskData":"exists"},"mockRules":[{"sourceCode":"RISK","responseJson":"{\\"score\\":85,\\"level\\":\\"A\\"}"}]}
+                      ]
+                    }""";
+                return LlmResponse.of(content, "siliconflow", "Qwen/Qwen3-8B",
+                        TokenUsage.of(100, 50), 5);
+            }
+        };
+    }
+
+    /** 测试用 Qwen Fake Provider */
     @Bean("qwen")
     public LlmProvider testQwenProvider() {
         return new LlmProvider() {
