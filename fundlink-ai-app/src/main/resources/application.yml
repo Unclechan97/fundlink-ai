@@ -66,3 +66,9 @@ logging:
     com.fundlink.ai: DEBUG
     com.fundlink.ai.gateway: DEBUG
     com.fundlink.ai.agent: DEBUG
+    # 关闭 SQL 日志
+    com.fundlink.ai.mapper: WARN
+    com.baomidou.mybatisplus: WARN
+    org.mybatis: WARN
+    org.springframework.jdbc: WARN
+    com.fundlink.ai.agent: DEBUG
