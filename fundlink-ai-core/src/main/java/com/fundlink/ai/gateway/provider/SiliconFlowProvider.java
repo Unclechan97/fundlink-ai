@@ -73,7 +73,7 @@ public class SiliconFlowProvider implements LlmProvider {
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Bearer " + apiKey)
                     .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
-                    .timeout(Duration.ofSeconds(120))
+                    .timeout(Duration.ofMinutes(20))
                     .build();
 
             var httpResp = http.send(httpReq, HttpResponse.BodyHandlers.ofString());
