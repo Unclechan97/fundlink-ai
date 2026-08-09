@@ -56,8 +56,30 @@ public class FlowDryRunner {
         }
 
         if (condBranches.isEmpty()) {
-            log.info("[DRY-RUN] No CONDITION branches — skipping");
-            return DryRunResult.ok(results);
+            log.info("[DRY-RUN] No CONDITION branches — running basic smoke test");
+            try {
+                Map<String, Object> inputData = (testGen != null && testGen.getTestCases() != null
+                        && !testGen.getTestCases().isEmpty())
+                        ? testGen.getTestCases().get(0).getInputData()
+                        : Map.of();
+                Map<String, Object> result = executeDryRun(flowId, inputData);
+                if (result == null) {
+                    return DryRunResult.fail(results, "Smoke test returned null");
+                }
+                Boolean success = (Boolean) result.getOrDefault("success", false);
+                if (!Boolean.TRUE.equals(success)) {
+                    return DryRunResult.fail(results,
+                            "Smoke test failed: " + result.getOrDefault("errorMsg", "unknown"));
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> data = (Map<String, Object>) result.getOrDefault("data", Map.of());
+                results.add(BranchResult.ok("smoke", "N/A", data));
+                log.info("[DRY-RUN] Smoke test passed  dataKeys={}", data.keySet());
+                return DryRunResult.ok(results);
+            } catch (Exception e) {
+                log.error("[DRY-RUN] Smoke test error: {}", e.getMessage());
+                return DryRunResult.fail(results, "Smoke test exception: " + e.getMessage());
+            }
         }
 
         try {
