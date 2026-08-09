@@ -41,7 +41,7 @@ class RequirementAgentTest {
 
     @Test
     void shouldParseInterfaceDocIntoFieldMappings() {
-        RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK", null);
+        RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK", "LOAN", null);
 
         assertThat(result.getFieldMappings()).isNotEmpty();
         // 验证至少包含核心字段映射
@@ -53,7 +53,7 @@ class RequirementAgentTest {
 
     @Test
     void shouldGenerateFlowDsl() {
-        RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK", null);
+        RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK", "LOAN", null);
 
         assertThat(result.getFlowDsl()).isNotNull();
         assertThat(result.getFlowDsl().getNodes()).isNotEmpty();
@@ -66,7 +66,7 @@ class RequirementAgentTest {
 
     @Test
     void shouldParseInterfaceSchema() {
-        RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK", null);
+        RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK", "LOAN", null);
 
         assertThat(result.getInterfaceSchema()).isNotNull();
         assertThat(result.getInterfaceSchema().getEndpoint())
@@ -76,7 +76,7 @@ class RequirementAgentTest {
 
     @Test
     void shouldParseProviderConfig() {
-        RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK", null);
+        RequirementResult result = agent.analyze(SAMPLE_DOC, "TEST_BANK", "LOAN", null);
 
         assertThat(result.getProviderConfig()).isNotNull();
         assertThat(result.getProviderConfig().getProviderName()).isNotBlank();

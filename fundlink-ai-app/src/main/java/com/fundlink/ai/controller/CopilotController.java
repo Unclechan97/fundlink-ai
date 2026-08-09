@@ -26,8 +26,9 @@ public class CopilotController {
      */
     @PostMapping("/analyze")
     public ApiAiResponse<RequirementResult> analyze(@RequestBody AnalyzeRequest req) {
+        String ft = req.getFlowType() != null ? req.getFlowType() : "LOAN";
         RequirementResult result = requirementAgent.analyze(
-                req.getDocumentText(), req.getProviderCode(), null);
+                req.getDocumentText(), req.getProviderCode(), ft, null);
         if (result.getParseError() != null) {
             return ApiAiResponse.error("AI 解析异常: " + result.getParseError(), result);
         }
@@ -50,8 +51,9 @@ public class CopilotController {
      */
     @PostMapping("/suggest-mappings")
     public ApiAiResponse<List<Map<String, Object>>> suggestMappings(@RequestBody AnalyzeRequest req) {
+        String ft = req.getFlowType() != null ? req.getFlowType() : "LOAN";
         RequirementResult result = requirementAgent.analyze(
-                req.getDocumentText(), req.getProviderCode(), null);
+                req.getDocumentText(), req.getProviderCode(), ft, null);
 
         List<Map<String, Object>> mappings = result.getFieldMappings().stream()
                 .<Map<String, Object>>map(m -> {
@@ -71,11 +73,14 @@ public class CopilotController {
     public static class AnalyzeRequest {
         private String documentText;
         private String providerCode;
+        private String flowType;
 
         public String getDocumentText() { return documentText; }
         public void setDocumentText(String d) { this.documentText = d; }
         public String getProviderCode() { return providerCode; }
         public void setProviderCode(String p) { this.providerCode = p; }
+        public String getFlowType() { return flowType; }
+        public void setFlowType(String f) { this.flowType = f; }
     }
 
     public static class ApplyRequest {

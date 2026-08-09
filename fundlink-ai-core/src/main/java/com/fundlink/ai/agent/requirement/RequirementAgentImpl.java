@@ -31,18 +31,19 @@ public class RequirementAgentImpl implements RequirementAgent {
     }
 
     @Override
-    public RequirementResult analyze(String documentText, String providerCode,
+    public RequirementResult analyze(String documentText, String providerCode, String flowType,
                                       List<DiagnosisResult> previousErrors) {
         String traceId = "req-" + UUID.randomUUID().toString().substring(0, 8);
-        log.info("[REQ-AGENT] Start  traceId={}  provider={}  docLen={}",
-                traceId, providerCode, documentText.length());
+        String ft = flowType != null ? flowType.toLowerCase() : "loan";
+        log.info("[REQ-AGENT] Start  traceId={}  provider={}  flowType={}  docLen={}",
+                traceId, providerCode, ft, documentText.length());
 
         // 1. RAG 检索历史案例
-        List<String> ragExamples = enhancer.search("字段映射 流程配置 " + providerCode);
+        List<String> ragExamples = enhancer.search(ft + " 字段映射 流程配置 " + providerCode);
         log.info("[REQ-AGENT] RAG examples={}  traceId={}", ragExamples.size(), traceId);
 
         // 2. 组装 Prompt (模板 + 字段目录 + RAG)
-        String prompt = promptBuilder.build(documentText, providerCode, "loan", ragExamples);
+        String prompt = promptBuilder.build(documentText, providerCode, ft, ragExamples);
 
         // 2b. 注入上一轮诊断结果 (Retry 修正)
         if (previousErrors != null && !previousErrors.isEmpty()) {

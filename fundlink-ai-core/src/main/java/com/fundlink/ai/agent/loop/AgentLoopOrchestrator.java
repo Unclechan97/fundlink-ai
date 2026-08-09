@@ -144,7 +144,7 @@ public class AgentLoopOrchestrator {
 
         long start = System.currentTimeMillis();
         RequirementResult result = requirementAgent.analyze(
-                s.documentText, s.providerCode, s.previousErrors);
+                s.documentText, s.providerCode, s.flowType, s.previousErrors);
         long duration = System.currentTimeMillis() - start;
 
         if (result.getParseError() != null) {
