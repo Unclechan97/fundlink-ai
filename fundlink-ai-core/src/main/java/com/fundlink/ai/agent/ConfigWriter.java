@@ -101,6 +101,7 @@ public class ConfigWriter {
         }
 
         String content = buildFreeMarker(mappings);
+        log.info("[WRITE] Template content: {}", content.replaceAll("\\s+", " "));
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("templateCode", templateCode);
         body.put("templateName", providerCode + " AI生成模板");

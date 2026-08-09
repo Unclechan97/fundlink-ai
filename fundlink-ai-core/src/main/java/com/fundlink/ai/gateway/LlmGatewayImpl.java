@@ -41,9 +41,11 @@ public class LlmGatewayImpl implements LlmGateway {
         // Build ordered provider chain (dedup, skip missing)
         List<String> chain = buildChain(request);
 
-        log.info("[GATEWAY] Route request  traceId={}  taskType={}  chain={}  promptLen={}",
+        String compactPrompt = compact(request.getPrompt());
+        log.info("[GATEWAY] >>> REQ  traceId={}  taskType={}  chain={}  promptLen={}",
                 request.getTraceId(), request.getTaskType(), chain,
                 request.getPrompt() != null ? request.getPrompt().length() : 0);
+        log.info("[GATEWAY] >>> PROMPT  {}", compactPrompt);
 
         RuntimeException lastError = null;
         for (String providerName : chain) {
@@ -64,13 +66,12 @@ public class LlmGatewayImpl implements LlmGateway {
             try {
                 response = provider.chat(request);
                 String content = response.getContent();
-                log.info("[GATEWAY] Response received  traceId={}  provider={}  contentLen={}  tokensIn={}  tokensOut={}",
+                log.info("[GATEWAY] <<< RESP  traceId={}  provider={}  contentLen={}  tokensIn={}  tokensOut={}",
                         request.getTraceId(), providerName,
                         content != null ? content.length() : 0,
                         response.getTokenUsage().getInputTokens(),
                         response.getTokenUsage().getOutputTokens());
-                log.debug("[GATEWAY] Response content  traceId={}\n{}",
-                        request.getTraceId(), content);
+                log.info("[GATEWAY] <<< CONTENT  {}", compact(content));
                 return response;
             } catch (Exception e) {
                 success = false;
@@ -118,5 +119,11 @@ public class LlmGatewayImpl implements LlmGateway {
         chain.addAll(fallbackChain);
 
         return new ArrayList<>(chain);
+    }
+
+    /** 压缩文本用于日志输出：去掉换行和多余空格 */
+    private static String compact(String s) {
+        if (s == null) return "null";
+        return s.replace("\r", "").replace("\n", "\\n").replaceAll("\\s{2,}", " ");
     }
 }

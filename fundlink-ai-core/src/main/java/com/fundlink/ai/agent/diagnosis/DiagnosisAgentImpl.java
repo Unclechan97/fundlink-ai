@@ -139,11 +139,18 @@ public class DiagnosisAgentImpl implements DiagnosisAgent {
         try {
             String prompt = buildDiagnosisPrompt(phase, error, context);
             String traceId = "diag-" + UUID.randomUUID().toString().substring(0, 8);
+            log.info("[DIAG] >>> LLM  phase={}  promptLen={}  errorHead={}", phase, prompt.length(),
+                    error != null ? error.substring(0, Math.min(100, error.length())) : "null");
             LlmRequest request = LlmRequest.ofTask("diagnosis", prompt, traceId);
             String content = llmGateway.chat(request).getContent();
+            log.info("[DIAG] <<< LLM  contentLen={}  content={}", content != null ? content.length() : 0,
+                    content != null ? content.replaceAll("\\s+", " ") : "null");
 
             DiagnosisResult parsed = parseDiagnosisJson(content);
-            if (parsed != null) return parsed;
+            if (parsed != null) {
+                log.info("[DIAG] PARSED  rootCause={}  confidence={}", parsed.getRootCause(), parsed.getConfidence());
+                return parsed;
+            }
 
             // Parse failed — fallback
             List<String> chain = new ArrayList<>();

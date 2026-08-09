@@ -51,18 +51,29 @@ public class TemplateValidator {
             }
 
             // 1. 调 Preview API
-            String body = "{\"testData\":\"" + json.writeValueAsString(safeData)
-                    .replace("\\", "\\\\").replace("\"", "\\\"") + "\"}";
+            String safeJson = json.writeValueAsString(safeData);
+            String body = json.writeValueAsString(
+                    java.util.Map.of("testData", safeJson));
+            String previewUrl = fundlinkUrl + "/api/admin/templates/" + templateId + "/preview";
 
-            String resp = postJson(fundlinkUrl + "/api/admin/templates/" + templateId + "/preview", body);
+            log.info("[VALIDATE] >>> PREVIEW  templateId={}  dataSize={}  previewDataKeys={}",
+                    templateId, safeJson.length(), safeData.keySet());
+            log.info("[VALIDATE] >>> BODY  {}", safeJson.replaceAll("\\s+", " "));
+
+            String resp = postJson(previewUrl, body);
 
             if (resp == null || resp.isBlank()) {
+                log.warn("[VALIDATE] <<< PREVIEW EMPTY");
                 return ValidationResult.fail(Collections.emptyList(), "Preview API returned empty response", "");
             }
+
+            log.info("[VALIDATE] <<< PREVIEW  respLen={}", resp.length());
+            log.info("[VALIDATE] <<< RAW  {}", resp.replaceAll("\\s+", " "));
 
             Map<String, Object> root = json.readValue(resp, Map.class);
             Object code = root.get("code");
             if (code instanceof Number && ((Number) code).intValue() != 0) {
+                log.error("[VALIDATE] <<< PREVIEW ERROR  code={}  msg={}", code, root.get("msg"));
                 return ValidationResult.fail(Collections.emptyList(),
                         "Preview API error code=" + code + " msg=" + root.get("msg"), resp);
             }
@@ -75,8 +86,12 @@ public class TemplateValidator {
             }
 
             if (renderResult == null || renderResult.isBlank()) {
+                log.warn("[VALIDATE] <<< RENDER EMPTY");
                 return ValidationResult.fail(Collections.emptyList(), "Render result is empty", resp);
             }
+
+            log.info("[VALIDATE] <<< RENDER  len={}  preview={}", renderResult.length(),
+                    renderResult.length() > 500 ? renderResult.substring(0, 500) + "..." : renderResult);
 
             // 2. 检查 50002
             if (renderResult.contains("50002")) {
@@ -95,9 +110,14 @@ public class TemplateValidator {
             }
 
             if (!missingFields.isEmpty()) {
+                log.warn("[VALIDATE] MISSING FIELDS: {}  expected={}  checked={}",
+                        String.join(", ", missingFields),
+                        fieldMappings.stream().map(FieldMappingSuggestion::getFundField).toList(),
+                        missingFields.size());
                 return ValidationResult.fail(missingFields,
                         "Missing fields in render output: " + String.join(", ", missingFields), renderResult);
             }
+            log.info("[VALIDATE] All {} fields present in render output", fieldMappings != null ? fieldMappings.size() : 0);
 
             return ValidationResult.ok(renderResult);
 

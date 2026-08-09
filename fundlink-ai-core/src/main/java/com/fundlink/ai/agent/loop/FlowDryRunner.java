@@ -254,9 +254,17 @@ public class FlowDryRunner {
 
     private Map<String, Object> executeDryRun(Long flowId, Map<String, Object> inputData) throws Exception {
         Map<String, Object> body = Map.of("inputData", inputData != null ? inputData : Map.of());
-        String resp = postJson("/api/upstream/flows/" + flowId + "/dry-run",
-                json.writeValueAsString(body));
-        if (resp == null) return null;
+        String bodyJson = json.writeValueAsString(body);
+        log.info("[DRYRUN] >>> EXECUTE  flowId={}  input={}", flowId,
+                bodyJson.replaceAll("\\s+", " "));
+
+        String resp = postJson("/api/upstream/flows/" + flowId + "/dry-run", bodyJson);
+        if (resp == null) {
+            log.warn("[DRYRUN] <<< EXECUTE NULL");
+            return null;
+        }
+        log.info("[DRYRUN] <<< EXECUTE  resp={}", resp.replaceAll("\\s+", " "));
+
         Map<String, Object> root = json.readValue(resp, Map.class);
         Object data = root.get("data");
         if (data instanceof Map) return (Map<String, Object>) data;
