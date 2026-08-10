@@ -32,24 +32,39 @@ public class LoopTracer {
     public void trace(Long taskId, String traceId, String phase, String agentType,
                       String inputSummary, String outputSummary, TokenUsage usage,
                       long durationMs, boolean success, String errorMsg) {
+        trace(taskId, traceId, phase, agentType,
+                inputSummary, outputSummary, null, null, null,
+                usage, durationMs, success, errorMsg);
+    }
+
+    /**
+     * 记录执行轨迹（含 tool_calls JSON 和全文）。
+     */
+    public void trace(Long taskId, String traceId, String phase, String agentType,
+                      String inputSummary, String outputSummary,
+                      String inputText, String outputText, String toolCallsJson,
+                      TokenUsage usage, long durationMs, boolean success, String errorMsg) {
         try {
             AiAgentTrace t = new AiAgentTrace();
-            // traceId 可能重跑时重复 — 加时间戳后缀确保唯一
-            String safeTraceId = traceId != null ? traceId : "trace-" + System.currentTimeMillis() % 100000;
-            t.setTraceId(safeTraceId + "-" + System.currentTimeMillis() % 100000);
+            // nanoTime 确保同一 traceId 下的多条记录不冲突 UNIQUE 约束
+            String safeTraceId = traceId != null ? traceId : "trace-" + randomSuffix();
+            t.setTraceId(safeTraceId + "-" + randomSuffix());
             t.setTaskId(taskId);
-            t.setPhase(phase);
+            t.setPhase(truncate(phase, 20));  // ai_agent_trace.phase = VARCHAR(20)
             t.setAgentName(agentType);
             t.setAgentType(agentType);
             t.setStepName(phase);
             t.setInputSummary(inputSummary);
             t.setOutputSummary(outputSummary);
+            t.setInputText(inputText);
+            t.setOutputText(outputText);
+            t.setToolCalls(toolCallsJson);
             t.setDurationMs((int) durationMs);
             t.setLatencyMs((int) durationMs);
             t.setStatus(success ? "SUCCESS" : "FAILED");
             t.setSuccess(success ? 1 : 0);
             t.setErrorMsg(errorMsg);
-            t.setStartTime(LocalDateTime.now().minusSeconds(durationMs / 1000));
+            t.setStartTime(LocalDateTime.now().minusSeconds(Math.max(0, durationMs / 1000)));
             t.setEndTime(LocalDateTime.now());
             if (usage != null) {
                 try {
@@ -62,6 +77,50 @@ public class LoopTracer {
         } catch (Exception e) {
             log.error("[TRACE] Failed to write trace record: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 写入单次 Tool Calling 记录 — 用于排查的 ToolLoopListener。
+     */
+    public void traceToolCall(Long taskId, String traceId, int round,
+                               String toolName, String args, String result) {
+        String phase = "TOOL_LOOP_R" + round;
+        String toolCallsJson = buildToolCallJson(toolName, args, result);
+        trace(taskId, traceId, phase, toolName,
+                "参数: " + truncate(args, 480),
+                truncate(result, 480),
+                args, result, toolCallsJson,
+                null, 0, true, null);
+    }
+
+    // ── helpers ──
+
+    private static String randomSuffix() {
+        return String.valueOf(System.nanoTime() % 10000000);
+    }
+
+    private static String truncate(String s, int maxLen) {
+        if (s == null) return null;
+        return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
+    }
+
+    private static String buildToolCallJson(String toolName, String args, String result) {
+        try {
+            return "{\"tool\":\"" + escapeJson(toolName)
+                    + "\",\"args\":" + (args != null && !args.isEmpty() ? escapeJson(args) : "{}")
+                    + ",\"result\":" + (result != null ? escapeJson(result) : "\"\"") + "}";
+        } catch (Exception e) {
+            return "{\"tool\":\"" + escapeJson(toolName) + "\"}";
+        }
+    }
+
+    private static String escapeJson(String s) {
+        if (s == null) return "null";
+        return s.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 
     /**

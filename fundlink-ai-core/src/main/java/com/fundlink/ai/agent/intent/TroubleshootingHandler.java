@@ -74,10 +74,15 @@ public class TroubleshootingHandler implements IntentHandler {
 
             // Trace: RAG 检索阶段
             long ragDuration = System.currentTimeMillis() - ragStart;
+            String ragSummary = ragExamples.isEmpty()
+                    ? "未找到历史案例"
+                    : "找到 " + ragExamples.size() + " 个历史案例";
+            String ragInputText = "用户报错日志 (截断): " + (errorLog != null
+                    ? errorLog.substring(0, Math.min(300, errorLog.length())) : "");
             loopTracer.trace(taskId, traceId, "RAG_SEARCH", "troubleshoot",
-                    "用户报错日志",
-                    ragExamples.isEmpty() ? "未找到历史案例" : "找到 " + ragExamples.size() + " 个历史案例",
-                    null, ragDuration, ragSuccess, ragError);
+                    ragInputText, ragSummary,
+                    ragInputText, ragSuccess ? ragSummary : ("RAG 检索失败: " + ragError),
+                    null, null, ragDuration, ragSuccess, ragError);
 
             // ── 4. 构建系统 Prompt ──
             String systemPrompt = buildSystemPrompt();
@@ -99,16 +104,7 @@ public class TroubleshootingHandler implements IntentHandler {
                 @Override
                 public void onToolCall(int round, String toolName, String args, String result) {
                     roundToolCount[0]++;
-                    // 截断结果避免 trace 记录过大
-                    String shortResult = result != null && result.length() > 500
-                            ? result.substring(0, 500) + "..." : result;
-                    String shortArgs = args != null && args.length() > 200
-                            ? args.substring(0, 200) + "..." : args;
-
-                    loopTracer.trace(taskId, traceId, "TOOL_LOOP_R" + round, toolName,
-                            "参数: " + shortArgs,
-                            shortResult,
-                            null, 0, true, null);
+                    loopTracer.traceToolCall(taskId, traceId, round, toolName, args, result);
                 }
 
                 @Override
@@ -135,11 +131,12 @@ public class TroubleshootingHandler implements IntentHandler {
             loopTracer.writebackTroubleshootKnowledge(task, analysis, ragExamples.size());
 
             // Trace: 整体完成
-            loopTracer.trace(taskId, traceId, "TROUBLESHOOT_COMPLETE", "troubleshoot",
+            loopTracer.trace(taskId, traceId, "DIAG_COMPLETE", "troubleshoot",
                     "排查完成",
                     "总耗时 " + totalDuration + "ms | RAG " + ragExamples.size() + " 例 | ToolLoop "
                             + currentRound[0] + " 轮",
-                    null, totalDuration, true, null);
+                    null, analysis,
+                    null, null, totalDuration, true, null);
 
             return TroubleshootResult.of(taskId, analysis);
 
