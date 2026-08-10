@@ -30,8 +30,9 @@ public class FeedbackController {
      * <pre>
      * {
      *   "taskId": 123,
-     *   "rating": "HELPFUL",        // HELPFUL | NOT_HELPFUL
-     *   "correction": "实际是..."    // 可选，用户修正内容
+     *   "rating": "HELPFUL",                  // HELPFUL | NOT_HELPFUL
+     *   "category": "FreeMarker",             // FreeMarker | FieldMapping | SpEL | DataSource | EnumMap | Other
+     *   "correction": "实际是模板变量名写错了"  // 可选，用户修正内容
      * }
      * </pre>
      */
@@ -47,6 +48,8 @@ public class FeedbackController {
         }
         Long taskId = Long.valueOf(taskIdObj.toString());
         String rating = req.getOrDefault("rating", "NO_RATING").toString();
+        String category = req.containsKey("category") && req.get("category") != null
+                ? req.get("category").toString() : null;
         String correction = req.containsKey("correction") && req.get("correction") != null
                 ? req.get("correction").toString() : null;
 
@@ -63,7 +66,7 @@ public class FeedbackController {
             log.warn("[Feedback] Failed to read task {}: {}", taskId, e.getMessage());
         }
 
-        feedbackCollector.collectRating(taskId, rating, correction, aiSuggestion, providerCode);
+        feedbackCollector.collectRating(taskId, rating, category, correction, aiSuggestion, providerCode);
 
         result.put("code", 0);
         result.put("msg", "反馈已记录");

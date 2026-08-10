@@ -42,12 +42,13 @@ public class FeedbackCollector {
      *
      * @param taskId       排查任务 ID
      * @param rating       评分: "HELPFUL" / "NOT_HELPFUL"
+     * @param category     错误分类: FreeMarker / FieldMapping / SpEL / DataSource / EnumMap / Other
      * @param correction   用户手动修正内容（可为 null）
      * @param aiSuggestion AI 原始诊断文本
      * @param providerCode 资金方编码
      */
     @Async
-    public void collectRating(Long taskId, String rating, String correction,
+    public void collectRating(Long taskId, String rating, String category, String correction,
                                String aiSuggestion, String providerCode) {
         try {
             AiFeedback fb = new AiFeedback();
@@ -56,12 +57,14 @@ public class FeedbackCollector {
             fb.setAiSuggestion(aiSuggestion != null ? aiSuggestion : "");
             fb.setHumanResult(rating != null ? rating : "NO_RATING");
             fb.setDiffSummary(correction != null ? correction : "");
-            fb.setCategory(rating != null ? rating : "NO_RATING");
+            // category 用于 PatternAnalyzer 聚合挖掘高频失败模式
+            fb.setCategory(category != null && !category.isBlank() ? category
+                    : (rating != null ? rating : "NO_RATING"));
             fb.setProviderCode(providerCode);
             fb.setCreateTime(LocalDateTime.now());
             mapper.insert(fb);
-            log.info("Troubleshoot feedback recorded: task={}, rating={}, hasCorrection={}",
-                    taskId, rating, correction != null && !correction.isBlank());
+            log.info("Troubleshoot feedback recorded: task={}, rating={}, category={}, hasCorrection={}",
+                    taskId, rating, category, correction != null && !correction.isBlank());
         } catch (Exception e) {
             log.error("Failed to save troubleshoot feedback", e);
         }
