@@ -43,7 +43,7 @@ public class MultiInterfaceOrchestrator {
     }
 
     /** 测试用构造函数 — 注入自定义 Executor */
-    MultiInterfaceOrchestrator(RequirementAgent requirementAgent,
+    public MultiInterfaceOrchestrator(RequirementAgent requirementAgent,
                                 ConfigWriter configWriter,
                                 PromptBuilder promptBuilder,
                                 LoopEventPublisher eventPublisher,
