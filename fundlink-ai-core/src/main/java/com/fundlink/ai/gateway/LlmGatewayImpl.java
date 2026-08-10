@@ -41,11 +41,12 @@ public class LlmGatewayImpl implements LlmGateway {
         // Build ordered provider chain (dedup, skip missing)
         List<String> chain = buildChain(request);
 
-        String compactPrompt = compact(request.getPrompt());
-        log.info("[GATEWAY] >>> REQ  traceId={}  taskType={}  chain={}  promptLen={}",
+        String promptPreview = promptPreview(request);
+        log.info("[GATEWAY] >>> REQ  traceId={}  taskType={}  chain={}  promptLen={}  hasTools={}",
                 request.getTraceId(), request.getTaskType(), chain,
-                request.getPrompt() != null ? request.getPrompt().length() : 0);
-        log.info("[GATEWAY] >>> PROMPT  {}", compactPrompt);
+                promptPreview != null ? promptPreview.length() : 0,
+                request.getTools() != null && !request.getTools().isEmpty());
+        log.info("[GATEWAY] >>> PROMPT  {}", compact(promptPreview));
 
         RuntimeException lastError = null;
         for (String providerName : chain) {
@@ -125,5 +126,28 @@ public class LlmGatewayImpl implements LlmGateway {
     private static String compact(String s) {
         if (s == null) return "null";
         return s.replace("\r", "").replace("\n", "\\n").replaceAll("\\s{2,}", " ");
+    }
+
+    /** 提取 Prompt 预览：旧字段 prompt → 新字段 messages（Tool Calling 模式） */
+    private static String promptPreview(LlmRequest request) {
+        // 旧模式：单一 prompt
+        if (request.getPrompt() != null && !request.getPrompt().isBlank()) {
+            return request.getPrompt();
+        }
+        // 新模式：多轮对话 messages
+        List<Map<String, Object>> messages = request.getMessages();
+        if (messages != null && !messages.isEmpty()) {
+            StringBuilder sb = new StringBuilder("[messages × ").append(messages.size()).append("] ");
+            for (Map<String, Object> msg : messages) {
+                String role = String.valueOf(msg.getOrDefault("role", "?"));
+                Object content = msg.get("content");
+                String preview = content != null
+                        ? content.toString().replace("\r", "").replace("\n", " ").substring(0, Math.min(120, content.toString().length()))
+                        : "null";
+                sb.append(role).append(": ").append(preview).append(" | ");
+            }
+            return sb.toString();
+        }
+        return null;
     }
 }

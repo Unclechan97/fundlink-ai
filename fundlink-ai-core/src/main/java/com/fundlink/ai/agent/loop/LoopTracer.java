@@ -104,23 +104,48 @@ public class LoopTracer {
         return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
     }
 
+    /**
+     * 构建 tool_calls JSON。
+     * args 和 result 已是 JSON 字符串（来自 ObjectMapper / Tool.execute），
+     * 需要原样嵌入，不能用 escapeJson 再转义一次。
+     */
     private static String buildToolCallJson(String toolName, String args, String result) {
-        try {
-            return "{\"tool\":\"" + escapeJson(toolName)
-                    + "\",\"args\":" + (args != null && !args.isEmpty() ? escapeJson(args) : "{}")
-                    + ",\"result\":" + (result != null ? escapeJson(result) : "\"\"") + "}";
-        } catch (Exception e) {
-            return "{\"tool\":\"" + escapeJson(toolName) + "\"}";
-        }
+        // 确保 args / result 是有效的 JSON 片段，否则当作纯文本字符串
+        String argsJson = isJsonLike(args) ? args : jsonString(args);
+        String resultJson = isJsonLike(result) ? result : jsonString(result);
+
+        return "{\"tool\":" + jsonString(toolName)
+                + ",\"args\":" + argsJson
+                + ",\"result\":" + resultJson + "}";
     }
 
-    private static String escapeJson(String s) {
+    /** JSON 对象或数组开头 → 原样嵌入 */
+    private static boolean isJsonLike(String s) {
+        if (s == null || s.isBlank()) return false;
+        String t = s.trim();
+        return t.startsWith("{") || t.startsWith("[");
+    }
+
+    /** 将普通字符串包装为 JSON 字符串值 */
+    private static String jsonString(String s) {
         if (s == null) return "null";
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        StringBuilder sb = new StringBuilder(s.length() + 4);
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':  sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n");  break;
+                case '\r': sb.append("\\r");  break;
+                case '\t': sb.append("\\t");  break;
+                default:
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+            }
+        }
+        sb.append('"');
+        return sb.toString();
     }
 
     /**
