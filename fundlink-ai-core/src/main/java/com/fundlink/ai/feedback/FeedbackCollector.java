@@ -36,4 +36,34 @@ public class FeedbackCollector {
             log.error("Failed to save feedback", e);
         }
     }
+
+    /**
+     * 排查反馈 — 用户对排查结果评分（踩/赞）+ 可选修正。
+     *
+     * @param taskId       排查任务 ID
+     * @param rating       评分: "HELPFUL" / "NOT_HELPFUL"
+     * @param correction   用户手动修正内容（可为 null）
+     * @param aiSuggestion AI 原始诊断文本
+     * @param providerCode 资金方编码
+     */
+    @Async
+    public void collectRating(Long taskId, String rating, String correction,
+                               String aiSuggestion, String providerCode) {
+        try {
+            AiFeedback fb = new AiFeedback();
+            fb.setTaskId(taskId);
+            fb.setFeedbackType("TROUBLESHOOT_RATING");
+            fb.setAiSuggestion(aiSuggestion != null ? aiSuggestion : "");
+            fb.setHumanResult(rating != null ? rating : "NO_RATING");
+            fb.setDiffSummary(correction != null ? correction : "");
+            fb.setCategory(rating != null ? rating : "NO_RATING");
+            fb.setProviderCode(providerCode);
+            fb.setCreateTime(LocalDateTime.now());
+            mapper.insert(fb);
+            log.info("Troubleshoot feedback recorded: task={}, rating={}, hasCorrection={}",
+                    taskId, rating, correction != null && !correction.isBlank());
+        } catch (Exception e) {
+            log.error("Failed to save troubleshoot feedback", e);
+        }
+    }
 }

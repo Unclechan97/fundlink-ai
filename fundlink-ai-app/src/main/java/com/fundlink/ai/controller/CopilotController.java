@@ -3,6 +3,7 @@ package com.fundlink.ai.controller;
 import com.fundlink.ai.agent.ConfigWriter;
 import com.fundlink.ai.agent.FlowTypeDetector;
 import com.fundlink.ai.agent.intent.*;
+import com.fundlink.ai.agent.loop.LoopTracer;
 import com.fundlink.ai.agent.requirement.FieldMappingSuggestion;
 import com.fundlink.ai.agent.requirement.RequirementAgent;
 import com.fundlink.ai.agent.requirement.RequirementResult;
@@ -11,6 +12,7 @@ import com.fundlink.ai.agent.split.InterfaceDeduplicator;
 import com.fundlink.ai.agent.split.InterfaceSegment;
 import com.fundlink.ai.gateway.LlmGateway;
 import com.fundlink.ai.gateway.RagGateway;
+import com.fundlink.ai.service.TroubleshootRecorder;
 import com.fundlink.ai.tools.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import jakarta.annotation.PostConstruct;
@@ -33,6 +35,8 @@ public class CopilotController {
     private final LlmGateway llmGateway;
     private final RagGateway ragGateway;
     private final JdbcTemplate jdbcTemplate;
+    private final TroubleshootRecorder troubleshootRecorder;
+    private final LoopTracer loopTracer;
 
     private DocumentSplitter documentSplitter;
     private IntentRouter intentRouter;
@@ -54,7 +58,8 @@ public class CopilotController {
         handlers.put(IntentType.INTERFACE_DEV, new InterfaceDevHandler(requirementAgent));
         handlers.put(IntentType.KNOWLEDGE_QA, new KnowledgeQaHandler(llmGateway, ragGateway));
         handlers.put(IntentType.TROUBLESHOOTING,
-                new TroubleshootingHandler(llmGateway, ragGateway, toolLoop));
+                new TroubleshootingHandler(llmGateway, ragGateway, toolLoop,
+                        troubleshootRecorder, loopTracer));
     }
 
     /**
@@ -261,11 +266,17 @@ public class CopilotController {
 
     /**
      * 问题排查：报错日志 → LLM 分析诊断。
+     * <p>
+     * 返回 taskId 供前端提交反馈（踩/赞 + 修正）。
      */
     @PostMapping("/troubleshoot")
     public ApiAiResponse<Map<String, Object>> troubleshoot(@RequestBody Map<String, String> req) {
         String input = req.getOrDefault("userInput", "");
-        IntentContext ctx = IntentContext.of(input, null);
+        String providerCode = req.getOrDefault("providerCode", null);
+        String traceId = "diag-" + UUID.randomUUID().toString().substring(0, 8);
+
+        IntentContext ctx = IntentContext.of(input, traceId);
+        ctx.setProviderCode(providerCode);
 
         IntentHandler handler = handlers.get(IntentType.TROUBLESHOOTING);
         if (handler == null) {
@@ -277,6 +288,7 @@ public class CopilotController {
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("intent", "TROUBLESHOOTING");
+        data.put("taskId", result.getTaskId());
         data.put("analysis", result.getAnalysis());
 
         return ApiAiResponse.success(data);

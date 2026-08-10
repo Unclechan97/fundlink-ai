@@ -8,7 +8,11 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * AI 闭环任务 — Agent Loop 核心状态载体
+ * AI 任务 — 闭环开发 & 问题排查共用的状态载体。
+ * <p>
+ * taskType: LOOP / MULTI_LOOP / DIAGNOSIS / REQUIREMENT
+ * status (闭环): PENDING → ANALYZE → VALIDATE → DRYRUN → DIAGNOSE → DECISION_POINT → PUBLISHED / FAILED / ABORTED
+ * status (排查): PENDING → DIAGNOSING → COMPLETED / FAILED
  */
 @Data
 @TableName("ai_task")
@@ -20,10 +24,10 @@ public class AiTask {
     /** 任务编号 (LOOP-xxx) */
     private String taskNo;
 
-    /** 任务类型: REQUIREMENT / LOOP */
+    /** 任务类型: REQUIREMENT / LOOP / MULTI_LOOP / DIAGNOSIS */
     private String taskType;
 
-    /** 状态: PENDING / ANALYZE / VALIDATE / DRYRUN / DIAGNOSE / DECISION_POINT / PUBLISHED / FAILED / ABORTED */
+    /** 状态: PENDING / ANALYZE / VALIDATE / DRYRUN / DIAGNOSE / DECISION_POINT / PUBLISHED / DIAGNOSING / COMPLETED / FAILED / ABORTED */
     private String status;
 
     /** 当前重试轮次 */

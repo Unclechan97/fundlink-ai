@@ -35,7 +35,8 @@ public class LoopTracer {
         try {
             AiAgentTrace t = new AiAgentTrace();
             // traceId 可能重跑时重复 — 加时间戳后缀确保唯一
-            t.setTraceId(traceId + "-" + System.currentTimeMillis() % 100000);
+            String safeTraceId = traceId != null ? traceId : "trace-" + System.currentTimeMillis() % 100000;
+            t.setTraceId(safeTraceId + "-" + System.currentTimeMillis() % 100000);
             t.setTaskId(taskId);
             t.setPhase(phase);
             t.setAgentName(agentType);
@@ -93,6 +94,61 @@ public class LoopTracer {
             }
         } catch (Exception e) {
             log.error("[TRACE] Knowledge writeback failed: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 排查结果 → RAG 知识回写。
+     * <p>
+     * 将排查诊断结果作为案例写入知识库，供后续排查时检索参考。
+     *
+     * @param task     排查任务（需含 errorLog / providerCode 等）
+     * @param analysis LLM 诊断结果全文
+     * @param ragCount RAG 检索到的历史案例数
+     */
+    public void writebackTroubleshootKnowledge(AiTask task, String analysis, int ragCount) {
+        if (analysis == null || analysis.isBlank()) return;
+
+        try {
+            // 截断分析文本避免 markdown 过大
+            String summary = analysis.length() > 500
+                    ? analysis.substring(0, 500) + "..."
+                    : analysis;
+
+            String providerCode = task.getProviderCode() != null
+                    ? task.getProviderCode() : "UNKNOWN";
+
+            String errorSnippet = "";
+            if (task.getDocumentText() != null && !task.getDocumentText().isBlank()) {
+                errorSnippet = task.getDocumentText().length() > 200
+                        ? task.getDocumentText().substring(0, 200) + "..."
+                        : task.getDocumentText();
+            }
+
+            String markdown = String.format("""
+                ## 排查案例
+                - **类型**: TROUBLESHOOT_CASE
+                - **资金方**: %s
+                - **检索到历史案例**: %d 条
+                - **错误摘要**: %s
+                - **诊断结果**: %s
+                - **来源**: AI 问题排查自动归档
+                - **关联任务**: %s
+                """,
+                    providerCode,
+                    ragCount,
+                    errorSnippet.replace("\n", " ").replace("\r", ""),
+                    summary.replace("\n", " ").replace("\r", ""),
+                    task.getTaskNo() != null ? task.getTaskNo() : "DIAG-UNKNOWN");
+
+            boolean ok = ragGateway.upsertKnowledge("TROUBLESHOOT_CASE",
+                    providerCode, markdown);
+            if (ok) {
+                log.info("[TRACE] Troubleshoot knowledge written to RAG  task={}  taskNo={}",
+                        task.getId(), task.getTaskNo());
+            }
+        } catch (Exception e) {
+            log.error("[TRACE] Troubleshoot knowledge writeback failed: {}", e.getMessage());
         }
     }
 }
