@@ -23,14 +23,27 @@ public class ConfigWriter {
         this.fundlinkUrl = fundlinkUrl;
     }
 
+    /** Phase 3: 带 interfaceId 的写入 */
+    public WriteResult writeAll(RequirementResult result, String providerCode, String flowType,
+                                 String interfaceId) {
+        WriteResult r = writeAllInternal(result, providerCode, flowType, interfaceId);
+        return r;
+    }
+
     public WriteResult writeAll(RequirementResult result, String providerCode, String flowType) {
+        return writeAllInternal(result, providerCode, flowType, null);
+    }
+
+    private WriteResult writeAllInternal(RequirementResult result, String providerCode,
+                                         String flowType, String interfaceId) {
         WriteResult r = new WriteResult();
         try {
             Long providerId = getOrCreateProvider(result.getProviderConfig(), providerCode);
             r.setProviderId(providerId);
             log.info("[WRITE] Provider id={}", providerId);
 
-            Long templateId = getOrCreateTemplate(result.getFieldMappings(), providerCode, providerId);
+            Long templateId = getOrCreateTemplate(result.getFieldMappings(), providerCode,
+                    providerId, interfaceId);
             r.setTemplateId(templateId);
             log.info("[WRITE] Template id={}", templateId);
 
@@ -50,7 +63,7 @@ public class ConfigWriter {
 
             if (result.getFlowDsl() != null && result.getFlowDsl().getNodes() != null) {
                 Long flowId = getOrCreateFlow(result.getFlowDsl(), result.getProviderConfig(),
-                        providerCode, flowType, providerId);
+                        providerCode, flowType, providerId, interfaceId);
                 r.setFlowId(flowId);
                 log.info("[WRITE] Flow id={}", flowId);
             }
@@ -92,8 +105,12 @@ public class ConfigWriter {
 
     // ── Template（幂等：code 用 providerCode 固定，重复则复用）──
     private Long getOrCreateTemplate(List<FieldMappingSuggestion> mappings,
-                                      String providerCode, Long providerId) throws Exception {
+                                      String providerCode, Long providerId,
+                                      String interfaceId) throws Exception {
         String templateCode = "AI_" + providerCode;
+        if (interfaceId != null && !interfaceId.isBlank()) {
+            templateCode = templateCode + "_" + interfaceId;
+        }
         String content = buildFreeMarker(mappings);
         log.info("[WRITE] Template content: {}", content.replaceAll("\\s+", " "));
 
@@ -359,10 +376,14 @@ public class ConfigWriter {
     }
 
     // ── Flow（幂等：先查后建）──
-    private Long getOrCreateFlow(FlowDsl dsl, ProviderConfig cfg, String code, String type, Long pid) throws Exception {
+    private Long getOrCreateFlow(FlowDsl dsl, ProviderConfig cfg, String code, String type,
+                                  Long pid, String interfaceId) throws Exception {
         // REPAY→REPAYMENT 规范化 (FundLink 侧 FlowType 枚举为 REPAYMENT)
         String fundLinkType = "REPAY".equalsIgnoreCase(type) ? "REPAYMENT" : (type != null ? type : "LOAN");
-        String flowCode = fundLinkType + "_" + code;  // 匹配上游 flowType_providerCode
+        String flowCode = fundLinkType + "_" + code;
+        if (interfaceId != null && !interfaceId.isBlank()) {
+            flowCode = flowCode + "_" + interfaceId;
+        }
         Long existing = findFlowByCode(flowCode);
         if (existing != null) {
             log.info("[WRITE] Flow exists code={} id={}", flowCode, existing);

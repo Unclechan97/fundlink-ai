@@ -1,5 +1,6 @@
 package com.fundlink.ai.agent;
 
+import com.fundlink.ai.agent.split.InterfaceSegment;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
@@ -47,6 +48,7 @@ public class PromptBuilder {
     }
 
     public Map<String, List<String>> getFields(String flowType) {
+        if (catalog == null) return Map.of();
         return catalog.getOrDefault(flowType.toLowerCase(),
                 catalog.getOrDefault("loan", Map.of()));
     }
@@ -81,6 +83,54 @@ public class PromptBuilder {
         }
         sb.append("\n## 数据源 (按顺序调用)\n");
         sb.append("- RISK→riskData  CORE→userInfo  PAYMENT→paymentData\n");
+        return sb.toString();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // Phase 3: 子 Agent 独立 Prompt
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * 为单个接口构建独立 Prompt。
+     * 只传当前接口的 sectionText，兄弟接口只传摘要。
+     */
+    public String buildInterfacePrompt(InterfaceSegment segment, List<InterfaceSegment> siblings,
+                                        String flowType, String providerCode) {
+        var fields = getFields(flowType != null ? flowType : "LOAN");
+        int total = siblings != null ? siblings.size() + 1 : 1;
+        int index = segment.getIndex() + 1; // 1-based for display
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(SYSTEM_PROMPT);
+        sb.append("\n");
+        sb.append(buildFieldContext(fields));
+
+        // 兄弟接口摘要（仅名称 + 端点）
+        if (siblings != null && !siblings.isEmpty()) {
+            sb.append("\n## 同文档其他接口\n");
+            for (InterfaceSegment sib : siblings) {
+                sb.append("- ").append(sib.getInterfaceName());
+                if (sib.getEndpoint() != null && !sib.getEndpoint().isBlank()) {
+                    sb.append(" (").append(sib.getEndpoint()).append(")");
+                }
+                sb.append("\n");
+            }
+        }
+
+        // 当前接口信息
+        sb.append("\n## 当前接口: ").append(segment.getInterfaceName()).append("\n");
+        sb.append("- 端点: ").append(segment.getMethod()).append(" ").append(segment.getEndpoint()).append("\n");
+        sb.append("- 文档位置: 第 ").append(index).append("/").append(total).append(" 个接口\n");
+
+        // 当前接口文档片段
+        sb.append("\n## 接口文档（仅当前接口部分）\n");
+        sb.append(segment.getSectionText());
+
+        // 上下文
+        sb.append("\n## 上下文\n");
+        sb.append("- 资金方: ").append(providerCode != null ? providerCode : "UNKNOWN").append("\n");
+        sb.append("- 流程类型: ").append(flowType != null ? flowType : "LOAN").append("\n");
+
         return sb.toString();
     }
 

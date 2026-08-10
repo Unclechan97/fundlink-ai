@@ -91,6 +91,70 @@ public class SseLoopEventPublisher implements LoopEventPublisher {
         send(taskId, "task:failed", Map.of("status", "FAILED", "error", error, "rounds", rounds));
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // Phase 3: 多接口事件
+    // ═══════════════════════════════════════════════════════════
+
+    @Override
+    public void splitStart(Long taskId) {
+        send(taskId, "split:start", Map.of());
+    }
+
+    @Override
+    public void splitComplete(Long taskId, int totalCount,
+                               List<Map<String, Object>> interfaces) {
+        send(taskId, "split:complete", Map.of("totalCount", totalCount, "interfaces", interfaces));
+    }
+
+    @Override
+    public void interfaceStart(Long taskId, String interfaceId, String name,
+                                int index, int total) {
+        send(taskId, "interface:start",
+                Map.of("interfaceId", interfaceId, "name", name, "index", index, "total", total));
+    }
+
+    @Override
+    public void interfacePhaseStart(Long taskId, String interfaceId,
+                                     String phase, int round, int maxRounds) {
+        send(taskId, "interface:phase:start",
+                Map.of("interfaceId", interfaceId, "phase", phase, "round", round, "maxRounds", maxRounds));
+    }
+
+    @Override
+    public void interfacePhaseProgress(Long taskId, String interfaceId,
+                                        String phase, String message) {
+        send(taskId, "interface:phase:progress",
+                Map.of("interfaceId", interfaceId, "phase", phase, "message", message));
+    }
+
+    @Override
+    public void interfacePhaseComplete(Long taskId, String interfaceId,
+                                        String phase, String summary) {
+        send(taskId, "interface:phase:complete",
+                Map.of("interfaceId", interfaceId, "phase", phase, "summary", summary));
+    }
+
+    @Override
+    public void interfacePhaseError(Long taskId, String interfaceId,
+                                     String phase, String message) {
+        send(taskId, "interface:phase:error",
+                Map.of("interfaceId", interfaceId, "phase", phase, "message", message));
+    }
+
+    @Override
+    public void interfaceComplete(Long taskId, String interfaceId, String name,
+                                   String status, String summary) {
+        send(taskId, "interface:complete",
+                Map.of("interfaceId", interfaceId, "name", name, "status", status, "summary", summary));
+    }
+
+    @Override
+    public void allComplete(Long taskId, int totalCount, int successCount,
+                             int failedCount) {
+        send(taskId, "all:complete",
+                Map.of("totalCount", totalCount, "successCount", successCount, "failedCount", failedCount));
+    }
+
     private void send(Long taskId, String eventName, Object data) {
         SseEmitter emitter = emitters.get(taskId);
         if (emitter == null) return;
