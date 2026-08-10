@@ -2,14 +2,20 @@ package com.fundlink.ai.controller;
 
 import com.fundlink.ai.agent.ConfigWriter;
 import com.fundlink.ai.agent.FlowTypeDetector;
+import com.fundlink.ai.agent.intent.*;
 import com.fundlink.ai.agent.requirement.FieldMappingSuggestion;
 import com.fundlink.ai.agent.requirement.RequirementAgent;
 import com.fundlink.ai.agent.requirement.RequirementResult;
+import com.fundlink.ai.agent.split.DocumentSplitter;
+import com.fundlink.ai.agent.split.InterfaceDeduplicator;
+import com.fundlink.ai.agent.split.InterfaceSegment;
+import com.fundlink.ai.gateway.LlmGateway;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * AI Copilot REST API — 前端对话交互入口
@@ -21,6 +27,21 @@ public class CopilotController {
 
     private final ConfigWriter configWriter;
     private final RequirementAgent requirementAgent;
+    private final LlmGateway llmGateway;
+
+    private DocumentSplitter documentSplitter;
+    private IntentRouter intentRouter;
+    private Map<IntentType, IntentHandler> handlers;
+
+    @PostConstruct
+    void init() {
+        documentSplitter = new DocumentSplitter(new InterfaceDeduplicator());
+        intentRouter = new IntentRouter(llmGateway);
+        handlers = new LinkedHashMap<>();
+        handlers.put(IntentType.INTERFACE_DEV, new InterfaceDevHandler(requirementAgent));
+        handlers.put(IntentType.KNOWLEDGE_QA, new KnowledgeQaHandler(llmGateway));
+        handlers.put(IntentType.TROUBLESHOOTING, new TroubleshootingHandler(llmGateway));
+    }
 
     /**
      * 需求解析：上传接口文档 → AI 生成配置
@@ -121,5 +142,108 @@ public class CopilotController {
         public int getCode() { return code; }
         public String getMsg() { return msg; }
         public T getData() { return data; }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // Phase 2: 新端点
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * 意图识别：用户输入 → 意图类型 + 置信度。
+     */
+    @PostMapping("/intent")
+    public ApiAiResponse<Map<String, Object>> detectIntent(@RequestBody Map<String, String> req) {
+        String input = req.getOrDefault("userInput", "");
+        IntentResult result = intentRouter.route(input);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("intent", result.getIntentType().name());
+        data.put("intentDisplay", result.getIntentType().getDisplayName());
+        data.put("confidence", result.getConfidence());
+        data.put("reason", result.getReason());
+        data.put("needUserConfirm", result.isNeedUserConfirm());
+        data.put("extractedInfo", result.getExtractedInfo());
+
+        return ApiAiResponse.success(data);
+    }
+
+    /**
+     * 文档拆分：多接口文档 → 接口片段列表 + 去重报告。
+     */
+    @PostMapping("/split")
+    public ApiAiResponse<Map<String, Object>> splitDocument(@RequestBody Map<String, String> req) {
+        String doc = req.getOrDefault("documentText", "");
+        List<InterfaceSegment> segments = documentSplitter.split(doc);
+
+        List<Map<String, Object>> interfaceList = segments.stream()
+                .map(seg -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("interfaceId", seg.getInterfaceId());
+                    m.put("interfaceName", seg.getInterfaceName());
+                    m.put("endpoint", seg.getEndpoint());
+                    m.put("method", seg.getMethod());
+                    m.put("flowType", seg.getFlowType());
+                    m.put("splitConfidence", seg.getSplitConfidence());
+                    m.put("splitSource", seg.getSplitSource().name());
+                    m.put("index", seg.getIndex());
+                    // 前 200 字符预览
+                    String text = seg.getSectionText();
+                    m.put("sectionPreview", text != null && text.length() > 200
+                            ? text.substring(0, 200) + "..." : text);
+                    return m;
+                }).collect(Collectors.toList());
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("totalCount", segments.size());
+        data.put("interfaces", interfaceList);
+        data.put("deduplications", List.of());   // Phase 3 补充
+        data.put("warnings", List.of());
+
+        return ApiAiResponse.success(data);
+    }
+
+    /**
+     * 知识问答：业务问题 → LLM 直接回答。
+     */
+    @PostMapping("/qa")
+    public ApiAiResponse<Map<String, Object>> qa(@RequestBody Map<String, String> req) {
+        String input = req.getOrDefault("userInput", "");
+        IntentContext ctx = IntentContext.of(input, null);
+
+        IntentHandler handler = handlers.get(IntentType.KNOWLEDGE_QA);
+        if (handler == null) {
+            return ApiAiResponse.error("QA handler not available", null);
+        }
+
+        KnowledgeQaHandler.QaResult result = (KnowledgeQaHandler.QaResult) handler.handle(ctx);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("intent", "KNOWLEDGE_QA");
+        data.put("answer", result.getAnswer());
+
+        return ApiAiResponse.success(data);
+    }
+
+    /**
+     * 问题排查：报错日志 → LLM 分析诊断。
+     */
+    @PostMapping("/troubleshoot")
+    public ApiAiResponse<Map<String, Object>> troubleshoot(@RequestBody Map<String, String> req) {
+        String input = req.getOrDefault("userInput", "");
+        IntentContext ctx = IntentContext.of(input, null);
+
+        IntentHandler handler = handlers.get(IntentType.TROUBLESHOOTING);
+        if (handler == null) {
+            return ApiAiResponse.error("Troubleshoot handler not available", null);
+        }
+
+        TroubleshootingHandler.TroubleshootResult result =
+                (TroubleshootingHandler.TroubleshootResult) handler.handle(ctx);
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("intent", "TROUBLESHOOTING");
+        data.put("analysis", result.getAnalysis());
+
+        return ApiAiResponse.success(data);
     }
 }
