@@ -93,11 +93,13 @@ public class MarkdownHeadingStrategy implements SplitStrategy {
     }
 
     static String generateId(String name, String endpoint, int index) {
+        String shortName = EndpointShortName.fromEndpoint(endpoint, name);
+        if (!"UNKNOWN".equals(shortName)) return shortName;
+        // 回退：sanitize name
         String base = name.replaceAll("[^a-zA-Z0-9\\u4e00-\\u9fa5]", "");
         if (base.length() > 20) base = base.substring(0, 20);
-        String hash = Integer.toHexString((endpoint + index).hashCode());
-        if (hash.length() > 6) hash = hash.substring(hash.length() - 6);
-        return base + "_" + hash;
+        if (!base.isBlank()) return base.toUpperCase();
+        return "INTERFACE_" + index;
     }
 
     // ── 内部类 ──

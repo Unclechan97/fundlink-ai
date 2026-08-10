@@ -94,6 +94,7 @@ public class AgentLoopOrchestrator {
         s.documentText = task.getDocumentText();
         s.providerCode = task.getProviderCode();
         s.flowType = task.getFlowType() != null ? task.getFlowType() : "LOAN";
+        s.interfaceId = task.getInterfaceId();
         s.round = task.getCurrentRound() != null ? task.getCurrentRound() : 0;
         s.maxRounds = task.getMaxRounds() != null ? task.getMaxRounds() : defaultMaxRounds;
         s.phase = TaskPhase.ANALYZE;
@@ -208,8 +209,8 @@ public class AgentLoopOrchestrator {
             s.flowType = result.getFlowType().toUpperCase();
         }
 
-        // Write config to FundLink
-        ConfigWriter.WriteResult write = configWriter.writeAll(result, s.providerCode, s.flowType);
+        // Write config to FundLink（多接口场景带 interfaceId 区分模板/流程）
+        ConfigWriter.WriteResult write = configWriter.writeAll(result, s.providerCode, s.flowType, s.interfaceId);
         s.writeResult = write;
         if (!write.isSuccess()) {
             eventPublisher.phaseError(s.taskId, "ANALYZE", "配置写入失败: " + write.getError());
@@ -222,11 +223,11 @@ public class AgentLoopOrchestrator {
         }
 
         eventPublisher.phaseComplete(s.taskId, "ANALYZE",
-                String.format("解析完成: %d 字段映射, %d 流程节点, Provider=%d, Template=%d",
+                String.format("解析完成: %d 字段映射, %d 流程节点 | Provider=%d, Template=%d, Flow=%d",
                         result.getFieldMappings() != null ? result.getFieldMappings().size() : 0,
                         result.getFlowDsl() != null && result.getFlowDsl().getNodes() != null
                                 ? result.getFlowDsl().getNodes().size() : 0,
-                        write.getProviderId(), write.getTemplateId()));
+                        write.getProviderId(), write.getTemplateId(), write.getFlowId()));
 
         loopTracer.trace(s.taskId, s.taskNo + "-A-" + s.round, "ANALYZE", "requirement",
                 "document len=" + (s.documentText != null ? s.documentText.length() : 0),
@@ -461,7 +462,7 @@ public class AgentLoopOrchestrator {
                     log.info("[LOOP] EDIT_AND_RETRY with editedResult  task={}", s.taskId);
                     s.currentResult = decision.getEditedResult();
                     ConfigWriter.WriteResult write = configWriter.writeAll(
-                            decision.getEditedResult(), s.providerCode, s.flowType);
+                            decision.getEditedResult(), s.providerCode, s.flowType, s.interfaceId);
                     s.writeResult = write;
                     if (!write.isSuccess()) {
                         log.warn("[LOOP] EDIT_AND_RETRY config rewrite failed: {}", write.getError());
@@ -522,8 +523,13 @@ public class AgentLoopOrchestrator {
 
         s.phase = TaskPhase.PUBLISHED;
         persistTask(s, "PUBLISHED");
+        ConfigWriter.WriteResult wr = s.writeResult;
+        String writeInfo = wr != null && wr.isSuccess()
+                ? String.format(" | Template #%d | Flow #%d | %d 字段映射",
+                    wr.getTemplateId(), wr.getFlowId(), wr.getMappingCount())
+                : "";
         eventPublisher.taskComplete(s.taskId, "PUBLISHED",
-                String.format("流程发布完成, 共 %d 轮", s.round + 1));
+                String.format("闭环完成 (共 %d 轮)%s", s.round + 1, writeInfo));
     }
 
     private void taskFailed(LoopState s, String reason) {
@@ -541,6 +547,17 @@ public class AgentLoopOrchestrator {
                 if (s.currentResult != null) {
                     try {
                         task.setCurrentResult(json.writeValueAsString(s.currentResult));
+                    } catch (Exception ignored) {}
+                }
+                // 持久化写入结果（模板ID、流程ID、映射数）
+                if (s.writeResult != null && s.writeResult.isSuccess()) {
+                    try {
+                        Map<String, Object> out = new LinkedHashMap<>();
+                        out.put("providerId", s.writeResult.getProviderId());
+                        out.put("templateId", s.writeResult.getTemplateId());
+                        out.put("flowId", s.writeResult.getFlowId());
+                        out.put("mappingCount", s.writeResult.getMappingCount());
+                        task.setOutputData(json.writeValueAsString(out));
                     } catch (Exception ignored) {}
                 }
                 task.setUpdateTime(LocalDateTime.now());
@@ -569,6 +586,7 @@ public class AgentLoopOrchestrator {
         String documentText;
         String providerCode;
         String flowType;
+        String interfaceId;
         int round;
         int maxRounds;
         TaskPhase phase;

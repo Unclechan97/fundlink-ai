@@ -44,10 +44,21 @@ public class DocumentSplitter {
      * @return 拆分后的接口片段列表（已去重），最少返回 1 个（兜底）
      */
     public List<InterfaceSegment> split(String documentText) {
+        SplitResult result = splitDetailed(documentText);
+        return result.segments();
+    }
+
+    /**
+     * 拆分文档并返回去重元数据。
+     *
+     * @param documentText 原始文档全文
+     * @return 拆分结果（含去重和相似度告警信息）
+     */
+    public SplitResult splitDetailed(String documentText) {
         // 空文档 / 空白文档
         if (documentText == null || documentText.isBlank()) {
             log.debug("[Split] Empty document, returning empty list");
-            return List.of();
+            return new SplitResult(List.of(), List.of(), List.of());
         }
 
         String text = documentText.trim();
@@ -73,7 +84,8 @@ public class DocumentSplitter {
                                 log.warn("[Split] Similarity warning: {}", w.getMessage()));
                     }
 
-                    return deduped.getKept();
+                    return new SplitResult(deduped.getKept(),
+                            deduped.getDeduplications(), deduped.getWarnings());
                 }
             } catch (Exception e) {
                 log.warn("[Split] Strategy {} failed: {}",
@@ -83,9 +95,10 @@ public class DocumentSplitter {
 
         // 所有策略都失败 → 兜底：全文档 = 单接口
         log.info("[Split] All strategies failed, fallback to full-doc single interface");
+        String title = extractDocTitle(text);
         InterfaceSegment seg = new InterfaceSegment();
-        seg.setInterfaceId("fullDoc_" + Integer.toHexString(text.hashCode()));
-        seg.setInterfaceName(extractDocTitle(text));
+        seg.setInterfaceId(EndpointShortName.fromEndpoint("", title));
+        seg.setInterfaceName(title);
         seg.setEndpoint("");
         seg.setMethod("");
         seg.setSectionText(text);
@@ -93,8 +106,17 @@ public class DocumentSplitter {
         seg.setSplitSource(SplitSource.FULL_DOC);
         seg.setSplitConfidence(PROGRAMMATIC_CONFIDENCE);
 
-        return List.of(seg);
+        return new SplitResult(List.of(seg), List.of(), List.of());
     }
+
+    /**
+     * 拆分结果，包含 segments 和去重元数据。
+     */
+    public record SplitResult(
+            List<InterfaceSegment> segments,
+            List<InterfaceDeduplicator.Deduplication> deduplications,
+            List<InterfaceDeduplicator.SimilarityWarning> warnings
+    ) {}
 
     /**
      * 重新编号，从 0 开始。

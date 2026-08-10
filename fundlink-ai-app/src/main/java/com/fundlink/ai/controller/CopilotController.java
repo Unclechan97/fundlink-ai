@@ -2,18 +2,17 @@ package com.fundlink.ai.controller;
 
 import com.fundlink.ai.agent.ConfigWriter;
 import com.fundlink.ai.agent.FlowTypeDetector;
-import com.fundlink.ai.agent.PromptBuilder;
 import com.fundlink.ai.agent.intent.*;
-import com.fundlink.ai.agent.loop.LoopEventPublisher;
-import com.fundlink.ai.agent.loop.MultiInterfaceOrchestrator;
 import com.fundlink.ai.agent.requirement.FieldMappingSuggestion;
-import com.fundlink.ai.agent.requirement.MultiInterfaceResult;
 import com.fundlink.ai.agent.requirement.RequirementAgent;
 import com.fundlink.ai.agent.requirement.RequirementResult;
 import com.fundlink.ai.agent.split.DocumentSplitter;
 import com.fundlink.ai.agent.split.InterfaceDeduplicator;
 import com.fundlink.ai.agent.split.InterfaceSegment;
 import com.fundlink.ai.gateway.LlmGateway;
+import com.fundlink.ai.gateway.RagGateway;
+import com.fundlink.ai.tools.*;
+import org.springframework.jdbc.core.JdbcTemplate;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -32,79 +31,39 @@ public class CopilotController {
     private final ConfigWriter configWriter;
     private final RequirementAgent requirementAgent;
     private final LlmGateway llmGateway;
-    private final LoopEventPublisher eventPublisher;
-    private final PromptBuilder promptBuilder;
+    private final RagGateway ragGateway;
+    private final JdbcTemplate jdbcTemplate;
 
     private DocumentSplitter documentSplitter;
     private IntentRouter intentRouter;
-    private MultiInterfaceOrchestrator multiInterfaceOrchestrator;
     private Map<IntentType, IntentHandler> handlers;
 
     @PostConstruct
     void init() {
         documentSplitter = new DocumentSplitter(new InterfaceDeduplicator());
         intentRouter = new IntentRouter(llmGateway);
-        multiInterfaceOrchestrator = new MultiInterfaceOrchestrator(
-                requirementAgent, configWriter, promptBuilder, eventPublisher);
+
+        ToolRegistry toolRegistry = new ToolRegistry();
+        toolRegistry.register(new RagSearchTool(ragGateway));
+        toolRegistry.register(new TemplateQueryTool(jdbcTemplate));
+        toolRegistry.register(new FieldMappingQueryTool(jdbcTemplate));
+        toolRegistry.register(new FlowDefinitionQueryTool(jdbcTemplate));
+        ToolCallingLoop toolLoop = new ToolCallingLoop(llmGateway, toolRegistry, 3);
+
         handlers = new LinkedHashMap<>();
         handlers.put(IntentType.INTERFACE_DEV, new InterfaceDevHandler(requirementAgent));
-        handlers.put(IntentType.KNOWLEDGE_QA, new KnowledgeQaHandler(llmGateway));
-        handlers.put(IntentType.TROUBLESHOOTING, new TroubleshootingHandler(llmGateway));
+        handlers.put(IntentType.KNOWLEDGE_QA, new KnowledgeQaHandler(llmGateway, ragGateway));
+        handlers.put(IntentType.TROUBLESHOOTING,
+                new TroubleshootingHandler(llmGateway, ragGateway, toolLoop));
     }
 
     /**
-     * 需求解析：上传接口文档 → AI 生成配置。
-     *
-     * Phase 3: 传 selectedInterfaceIds 时走多接口并行处理。
-     * 不传时退化为单接口处理（向后兼容）。
+     * 需求解析：上传接口文档 → AI 生成配置（纯单接口模式）。
      */
-    @SuppressWarnings("unchecked")
     @PostMapping("/analyze")
     public ApiAiResponse<Object> analyze(@RequestBody AnalyzeRequest req) {
         String ft = FlowTypeDetector.detect(req.getDocumentText(), req.getFlowType());
 
-        // ── 多接口模式 ──
-        if (req.getSelectedInterfaceIds() != null && !req.getSelectedInterfaceIds().isEmpty()) {
-            List<InterfaceSegment> allSegments = documentSplitter.split(req.getDocumentText());
-            List<InterfaceSegment> selected = allSegments.stream()
-                    .filter(s -> req.getSelectedInterfaceIds().contains(s.getInterfaceId()))
-                    .toList();
-
-            if (selected.isEmpty()) {
-                return ApiAiResponse.error("未找到选中的接口", null);
-            }
-
-            MultiInterfaceResult multiResult = multiInterfaceOrchestrator.processInterfaces(
-                    selected, req.getProviderCode(), ft);
-
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("providerCode", multiResult.getProviderCode());
-            data.put("totalCount", multiResult.getTotalCount());
-            data.put("successCount", multiResult.getSuccessCount());
-            data.put("failedCount", multiResult.getFailedCount());
-            List<Map<String, Object>> items = new ArrayList<>();
-            for (MultiInterfaceResult.InterfaceResultItem item : multiResult.getInterfaces()) {
-                Map<String, Object> m = new LinkedHashMap<>();
-                m.put("interfaceId", item.getInterfaceId());
-                m.put("interfaceName", item.getInterfaceName());
-                m.put("status", item.getStatus());
-                m.put("errorMessage", item.getErrorMessage());
-                m.put("result", item.getResult());
-                items.add(m);
-            }
-            data.put("interfaces", items);
-
-            // 单接口时返回扁平结果（兼容旧 UI）
-            if (selected.size() == 1 && multiResult.getSuccessCount() == 1) {
-                RequirementResult single = multiResult.getInterfaces().get(0).getResult();
-                if (single != null && single.getParseError() == null) {
-                    return ApiAiResponse.success(single);
-                }
-            }
-            return ApiAiResponse.success(data);
-        }
-
-        // ── 单接口模式（向后兼容）──
         RequirementResult result = requirementAgent.analyze(
                 req.getDocumentText(), req.getProviderCode(), ft, null);
         if (result.getParseError() != null) {
@@ -232,7 +191,8 @@ public class CopilotController {
     @PostMapping("/split")
     public ApiAiResponse<Map<String, Object>> splitDocument(@RequestBody Map<String, String> req) {
         String doc = req.getOrDefault("documentText", "");
-        List<InterfaceSegment> segments = documentSplitter.split(doc);
+        DocumentSplitter.SplitResult splitResult = documentSplitter.splitDetailed(doc);
+        List<InterfaceSegment> segments = splitResult.segments();
 
         List<Map<String, Object>> interfaceList = segments.stream()
                 .map(seg -> {
@@ -252,11 +212,27 @@ public class CopilotController {
                     return m;
                 }).collect(Collectors.toList());
 
+        // 去重信息
+        List<Map<String, String>> dedupList = splitResult.deduplications().stream()
+                .map(d -> {
+                    Map<String, String> m = new LinkedHashMap<>();
+                    m.put("keptName", d.getKeptName());
+                    m.put("removedName", d.getRemovedName());
+                    m.put("endpoint", d.getEndpoint());
+                    m.put("reason", d.getReason());
+                    return m;
+                }).collect(Collectors.toList());
+
+        // 相似度告警
+        List<String> warningList = splitResult.warnings().stream()
+                .map(w -> w.getMessage())
+                .collect(Collectors.toList());
+
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("totalCount", segments.size());
         data.put("interfaces", interfaceList);
-        data.put("deduplications", List.of());   // Phase 3 补充
-        data.put("warnings", List.of());
+        data.put("deduplications", dedupList);
+        data.put("warnings", warningList);
 
         return ApiAiResponse.success(data);
     }

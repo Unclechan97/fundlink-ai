@@ -14,8 +14,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * RAG HTTP 调用统一封装 — /token + /search + /knowledge/upsert
+ * RAG HTTP 调用统一封装 — /search + /knowledge/upsert
  * <p>
+ * 鉴权已移除，直连 RAG API。
  * PromptEnhancer / KnowledgeAutoWriter / LoopTracer 共用。
  */
 @Slf4j
@@ -24,7 +25,6 @@ public class RagGateway {
 
     private final String ragBaseUrl;
     private final ObjectMapper json = new ObjectMapper();
-    private volatile String cachedToken;
 
     public RagGateway(@Value("${fundlink.rag.base-url:http://localhost:8000}") String ragBaseUrl) {
         this.ragBaseUrl = ragBaseUrl.endsWith("/") ? ragBaseUrl.substring(0, ragBaseUrl.length() - 1) : ragBaseUrl;
@@ -34,10 +34,9 @@ public class RagGateway {
     public List<String> search(String query, int topK) {
         List<String> results = new ArrayList<>();
         try {
-            String token = ensureToken();
             String body = json.writeValueAsString(
                     java.util.Map.of("query", query, "mode", "hybrid", "top_k", topK));
-            String resp = postJson("/search", body, token);
+            String resp = postJson("/search", body);
             if (resp == null) return results;
 
             JsonNode root = json.readTree(resp);
@@ -59,10 +58,9 @@ public class RagGateway {
     /** 知识条目写回 RAG */
     public boolean upsertKnowledge(String kind, String providerCode, String markdown) {
         try {
-            String token = ensureToken();
             String body = json.writeValueAsString(
                     java.util.Map.of("kind", kind, "provider_code", providerCode, "markdown", markdown));
-            String resp = postJson("/knowledge/upsert", body, token);
+            String resp = postJson("/knowledge/upsert", body);
             return resp != null;
         } catch (Exception e) {
             log.warn("[RAG] Knowledge upsert failed: {}", e.getMessage());
@@ -70,31 +68,13 @@ public class RagGateway {
         }
     }
 
-    /** 获取或刷新 RAG token */
-    public String ensureToken() throws Exception {
-        if (cachedToken != null) return cachedToken;
-
-        String body = "{\"username\":\"fundlink-ai\",\"role\":\"superadmin\"}";
-        String resp = postJson("/token", body, null);
-        if (resp != null) {
-            JsonNode root = json.readTree(resp);
-            cachedToken = root.path("token").asText(null);
-            if (cachedToken != null) {
-                log.info("[RAG] Token obtained");
-                return cachedToken;
-            }
-        }
-        throw new RuntimeException("RAG /token response missing token field");
-    }
-
     // -- HTTP helpers --
 
-    private String postJson(String path, String body, String token) throws Exception {
+    private String postJson(String path, String body) throws Exception {
         URI uri = new URI(ragBaseUrl + path);
         HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
         conn.setRequestMethod("POST");
         conn.setRequestProperty("Content-Type", "application/json");
-        if (token != null) conn.setRequestProperty("Authorization", "Bearer " + token);
         conn.setDoOutput(true);
         conn.setConnectTimeout(5000);
         conn.setReadTimeout(10000);
@@ -112,10 +92,6 @@ public class RagGateway {
             return sb.toString();
         }
 
-        // Token expired → clear cache
-        if (conn.getResponseCode() == 401 || conn.getResponseCode() == 403) {
-            cachedToken = null;
-        }
         log.warn("[RAG] HTTP {} for {}", conn.getResponseCode(), path);
         return null;
     }

@@ -391,6 +391,9 @@ public class ConfigWriter {
         }
 
         String templateCode = "AI_" + code;
+        if (interfaceId != null && !interfaceId.isBlank()) {
+            templateCode = templateCode + "_" + interfaceId;
+        }
         enrichFlowDsl(dsl, cfg, templateCode);
         Map<String, Object> graphData = Map.of("nodes", dsl.getNodes(), "edges",
                 dsl.getEdges() != null ? dsl.getEdges() : Collections.emptyList());

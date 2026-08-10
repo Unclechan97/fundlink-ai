@@ -3,16 +3,16 @@ package com.fundlink.ai.controller;
 import com.fundlink.ai.agent.FlowTypeDetector;
 import com.fundlink.ai.agent.loop.AgentLoopOrchestrator;
 import com.fundlink.ai.agent.loop.DecisionRequest;
+import com.fundlink.ai.agent.loop.MultiLoopOrchestrator;
 import com.fundlink.ai.entity.AiTask;
 import com.fundlink.ai.mapper.AiTaskMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDateTime;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Agent Loop REST API — SSE 闭环控制 (设计 §6)
@@ -20,12 +20,22 @@ import java.util.UUID;
 @Slf4j
 @RestController
 @RequestMapping("/api/ai/loop")
-@RequiredArgsConstructor
 public class LoopController {
 
     private final AgentLoopOrchestrator orchestrator;
+    private final MultiLoopOrchestrator multiOrchestrator;
     private final SseLoopEventPublisher ssePublisher;
     private final AiTaskMapper taskMapper;
+
+    public LoopController(AgentLoopOrchestrator orchestrator,
+                          MultiLoopOrchestrator multiOrchestrator,
+                          SseLoopEventPublisher ssePublisher,
+                          AiTaskMapper taskMapper) {
+        this.orchestrator = orchestrator;
+        this.multiOrchestrator = multiOrchestrator;
+        this.ssePublisher = ssePublisher;
+        this.taskMapper = taskMapper;
+    }
 
     /** Create loop task and start async execution */
     @PostMapping
@@ -53,6 +63,34 @@ public class LoopController {
                 "taskId", task.getId(),
                 "taskNo", task.getTaskNo()
         ));
+    }
+
+    /** Create multi-loop task: split doc → create parent + N sub-tasks → start each */
+    @PostMapping("/multi")
+    public CopilotController.ApiAiResponse<Map<String, Object>> createMulti(
+            @RequestBody CreateMultiLoopRequest req) {
+        MultiLoopOrchestrator.MultiLoopResult result = multiOrchestrator.createMultiLoop(
+                req.getDocumentText(),
+                req.getProviderCode(),
+                req.getFlowType(),
+                req.getSelectedInterfaceIds(),
+                req.getMaxRounds() != null ? req.getMaxRounds() : 3);
+
+        List<Map<String, Object>> subTaskList = result.getSubTasks().stream()
+                .map(st -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("taskId", st.getTaskId());
+                    m.put("interfaceId", st.getInterfaceId());
+                    m.put("interfaceName", st.getInterfaceName());
+                    return m;
+                }).collect(Collectors.toList());
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("parentTaskId", result.getParentTaskId());
+        data.put("parentTaskNo", result.getParentTaskNo());
+        data.put("subTasks", subTaskList);
+
+        return CopilotController.ApiAiResponse.success(data);
     }
 
     /** SSE stream endpoint — register emitter, then start orchestrator */
@@ -126,7 +164,26 @@ public class LoopController {
         }
     }
 
-    // -- DTO --
+    // -- DTOs --
+
+    public static class CreateMultiLoopRequest {
+        private String documentText;
+        private String providerCode;
+        private String flowType;
+        private List<String> selectedInterfaceIds;
+        private Integer maxRounds;
+
+        public String getDocumentText() { return documentText; }
+        public void setDocumentText(String d) { this.documentText = d; }
+        public String getProviderCode() { return providerCode; }
+        public void setProviderCode(String p) { this.providerCode = p; }
+        public String getFlowType() { return flowType; }
+        public void setFlowType(String f) { this.flowType = f; }
+        public List<String> getSelectedInterfaceIds() { return selectedInterfaceIds; }
+        public void setSelectedInterfaceIds(List<String> ids) { this.selectedInterfaceIds = ids; }
+        public Integer getMaxRounds() { return maxRounds; }
+        public void setMaxRounds(Integer r) { this.maxRounds = r; }
+    }
 
     public static class CreateLoopRequest {
         private String documentText;

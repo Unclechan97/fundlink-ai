@@ -3,22 +3,25 @@ package com.fundlink.ai.agent.intent;
 import com.fundlink.ai.gateway.LlmGateway;
 import com.fundlink.ai.gateway.LlmRequest;
 import com.fundlink.ai.gateway.LlmResponse;
+import com.fundlink.ai.gateway.RagGateway;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Map;
+import java.util.List;
 
 /**
- * 知识问答意图处理器（架子）。
+ * 知识问答意图处理器。
  *
- * 用户询问业务知识/产品规则时，LLM 直接回答。
+ * 用户询问业务知识/产品规则时，先检索 RAG 知识库，再交给 LLM 回答。
  */
 @Slf4j
 public class KnowledgeQaHandler implements IntentHandler {
 
     private final LlmGateway llmGateway;
+    private final RagGateway ragGateway;
 
-    public KnowledgeQaHandler(LlmGateway llmGateway) {
+    public KnowledgeQaHandler(LlmGateway llmGateway, RagGateway ragGateway) {
         this.llmGateway = llmGateway;
+        this.ragGateway = ragGateway;
     }
 
     @Override
@@ -28,7 +31,29 @@ public class KnowledgeQaHandler implements IntentHandler {
 
     @Override
     public Object handle(IntentContext ctx) {
-        String prompt = "你是资金接入系统专家。请用中文回答用户问题。\n\n用户问题：\n" + ctx.getUserInput();
+        // 1. RAG 检索相关知识
+        List<String> ragExamples = List.of();
+        try {
+            ragExamples = ragGateway.search(ctx.getUserInput(), 3);
+            log.info("[QA] RAG returned {} examples", ragExamples.size());
+        } catch (Exception e) {
+            log.warn("[QA] RAG search failed: {}", e.getMessage());
+        }
+
+        // 2. 构建 Prompt（注入 RAG 上下文）
+        StringBuilder sb = new StringBuilder();
+        if (!ragExamples.isEmpty()) {
+            sb.append("## 知识库参考\n");
+            sb.append("以下是从知识库中检索到的相关内容，请参考这些信息回答问题:\n\n");
+            for (int i = 0; i < ragExamples.size(); i++) {
+                sb.append("### 参考 ").append(i + 1).append("\n");
+                sb.append(ragExamples.get(i)).append("\n\n");
+            }
+            sb.append("---\n\n");
+        }
+        sb.append("你是资金接入系统专家。请参考上述知识库内容，用中文回答用户问题。\n\n");
+        sb.append("用户问题：\n").append(ctx.getUserInput());
+        String prompt = sb.toString();
 
         try {
             LlmResponse resp = llmGateway.chat(

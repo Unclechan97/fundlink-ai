@@ -53,6 +53,15 @@ public class AiTask {
     /** 关联 Trace ID */
     private String traceId;
 
+    /** 父任务 ID（多接口闭环时子任务指向主任务，单接口为 NULL） */
+    private Long parentTaskId;
+
+    /** 接口标识（如 LOAN_APPLY，子任务有值，主任务为 NULL） */
+    private String interfaceId;
+
+    /** 接口名称（如 "放款申请"） */
+    private String interfaceName;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;
