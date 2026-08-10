@@ -4,7 +4,6 @@ import com.fundlink.ai.agent.loop.LoopTracer;
 import com.fundlink.ai.entity.AiTask;
 import com.fundlink.ai.gateway.LlmGateway;
 import com.fundlink.ai.gateway.RagGateway;
-import com.fundlink.ai.gateway.TokenUsage;
 import com.fundlink.ai.service.TroubleshootRecorder;
 import com.fundlink.ai.tools.ToolCallingLoop;
 import com.fundlink.ai.tools.ToolLoopListener;
