@@ -157,31 +157,70 @@ class EndToEndMultiInterfaceTest {
     // ═══════════════════════════════════════════════
 
     @Test
-    @DisplayName("全选 4 个接口 → 4 次 analyze 调用")
+    @DisplayName("全选 4 个接口 → 4 次 analyze 调用（模拟真实 LLM 返回）")
     void shouldProcessAllSelected() {
-        // Step 1: 拆分（模拟 /api/ai/split）
+        // Step 1 + 2 + 3 same as before
         List<InterfaceSegment> allSegments = splitter.split(MULTI_DOC);
-
-        // Step 2: 用户全选（模拟前端 selectedIds）
         List<String> selectedIds = allSegments.stream()
                 .map(InterfaceSegment::getInterfaceId).toList();
+        List<InterfaceSegment> selected = allSegments.stream()
+                .filter(s -> selectedIds.contains(s.getInterfaceId()))
+                .toList();
+        assertThat(selected).hasSize(4);
 
-        // Step 3: 过滤选中（模拟 Controller 逻辑）
+        // Step 4: 并行处理
+        MultiInterfaceResult result = orchestrator.processInterfaces(selected, "DBS", "LOAN");
+
+        assertThat(result.getTotalCount()).isEqualTo(4);
+        assertThat(result.getSuccessCount()).isEqualTo(4);
+        assertThat(result.getFailedCount()).isEqualTo(0);
+        assertThat(analyzeCallCount.get()).isEqualTo(4);
+        // 验证每个 item 的 result 非空
+        result.getInterfaces().forEach(item -> {
+            assertThat(item.getResult()).isNotNull();
+            assertThat(item.getStatus()).isEqualTo("SUCCESS");
+        });
+    }
+
+    @Test
+    @DisplayName("部分失败 → successCount + failedCount 正确")
+    void shouldHandlePartialFailures() {
+        // 重建 orchestrator：第 3 个接口返回 parseError
+        AtomicInteger callCount = new AtomicInteger(0);
+        RequirementAgent flakyAgent = (documentText, providerCode, flowType, previousErrors) -> {
+            int n = callCount.incrementAndGet();
+            RequirementResult r = new RequirementResult();
+            r.setProviderConfig(new ProviderConfig());
+            r.setFlowType(flowType);
+            if (n == 3) { r.setParseError("Simulated failure"); }
+            return r;
+        };
+
+        Executor syncExecutor = Runnable::run;
+        LoopEventPublisher stubEvents = new LoopEventPublisher() {
+            @Override public void phaseStart(Long t, String p, int r, int m) {}
+            @Override public void phaseProgress(Long t, String p, String msg) {}
+            @Override public void phaseComplete(Long t, String p, String s) {}
+            @Override public void phaseError(Long t, String p, String msg) {}
+            @Override public void decisionRequired(Long t, String ty, String s, java.util.List<String> o) {}
+            @Override public void taskComplete(Long t, String s, String sum) {}
+            @Override public void taskFailed(Long t, String e, int r) {}
+        };
+        MultiInterfaceOrchestrator flakyOrch = new MultiInterfaceOrchestrator(
+                flakyAgent, null, new PromptBuilder(), stubEvents, syncExecutor);
+
+        List<InterfaceSegment> allSegments = splitter.split(MULTI_DOC);
+        List<String> selectedIds = allSegments.stream()
+                .map(InterfaceSegment::getInterfaceId).toList();
         List<InterfaceSegment> selected = allSegments.stream()
                 .filter(s -> selectedIds.contains(s.getInterfaceId()))
                 .toList();
 
-        assertThat(selected).hasSize(4);
+        MultiInterfaceResult result = flakyOrch.processInterfaces(selected, "DBS", "LOAN");
 
-        // Step 4: 并行处理（模拟 Controller 调用 MultiInterfaceOrchestrator）
-        MultiInterfaceResult result = orchestrator.processInterfaces(
-                selected, "DBS", "LOAN");
-
-        // 验证
         assertThat(result.getTotalCount()).isEqualTo(4);
-        assertThat(result.getSuccessCount()).isEqualTo(4);
-        assertThat(result.getFailedCount()).isEqualTo(0);
-        assertThat(analyzeCallCount.get()).isEqualTo(4); // 每个接口调一次
+        assertThat(result.getSuccessCount()).isEqualTo(3);
+        assertThat(result.getFailedCount()).isEqualTo(1);
     }
 
     // ═══════════════════════════════════════════════

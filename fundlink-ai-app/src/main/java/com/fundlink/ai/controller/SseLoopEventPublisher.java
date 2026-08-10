@@ -156,6 +156,7 @@ public class SseLoopEventPublisher implements LoopEventPublisher {
     }
 
     private void send(Long taskId, String eventName, Object data) {
+        if (taskId == null) return; // 手动模式无 SSE 连接，跳过事件
         SseEmitter emitter = emitters.get(taskId);
         if (emitter == null) return;
         try {
