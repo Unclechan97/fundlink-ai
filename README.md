@@ -30,4 +30,4 @@ cd fundlink-ui && npm run dev
 
 ## 演示
 
-[▶ 点击观看演示视频](video/fundlink-ai.mp4)
+[▶ 观看演示视频](https://www.bilibili.com/video/BV1AKuv6bEKM/)
