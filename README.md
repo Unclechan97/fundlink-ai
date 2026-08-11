@@ -30,4 +30,4 @@ cd fundlink-ui && npm run dev
 
 ## 演示
 
-<video src="video/fundlink-ai.mp4" controls width="800"></video>
+[▶ 点击观看演示视频](video/fundlink-ai.mp4)
