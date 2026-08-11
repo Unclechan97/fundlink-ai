@@ -30,4 +30,4 @@ cd fundlink-ui && npm run dev
 
 ## 演示
 
-<video src="video/8月10日.mp4" controls width="800"></video>
+<video src="video/fundlink-ai.mp4" controls width="800"></video>
