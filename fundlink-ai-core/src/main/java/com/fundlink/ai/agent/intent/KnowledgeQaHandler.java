@@ -31,13 +31,13 @@ public class KnowledgeQaHandler implements IntentHandler {
 
     @Override
     public Object handle(IntentContext ctx) {
-        // 1. RAG 检索相关知识
-        List<String> ragExamples = List.of();
-        try {
-            ragExamples = ragGateway.search(ctx.getUserInput(), 3);
-            log.info("[QA] RAG returned {} examples", ragExamples.size());
-        } catch (Exception e) {
-            log.warn("[QA] RAG search failed: {}", e.getMessage());
+        // 1. RAG 检索相关知识 — 不可用时直接向用户明示，不做无依据回答
+        RagGateway.SearchResult ragResult = ragGateway.search(ctx.getUserInput(), 3);
+        List<String> ragExamples = ragResult.getResults();
+        log.info("[QA] RAG returned {} examples  available={}", ragExamples.size(), ragResult.isAvailable());
+        if (!ragResult.isAvailable()) {
+            log.warn("[QA] RAG 不可用 — 返回明示提示");
+            return QaResult.of("知识库暂不可用，请稍后重试。");
         }
 
         // 2. 构建 Prompt（注入 RAG 上下文）

@@ -1,5 +1,6 @@
 package com.fundlink.ai.agent.loop;
 
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fundlink.ai.agent.ConfigWriter;
 import com.fundlink.ai.agent.diagnosis.DiagnosisAgent;
@@ -9,7 +10,6 @@ import com.fundlink.ai.agent.requirement.RequirementResult;
 import com.fundlink.ai.agent.testgen.TestGenAgent;
 import com.fundlink.ai.agent.testgen.TestGenResult;
 import com.fundlink.ai.entity.AiTask;
-import com.fundlink.ai.gateway.TokenUsage;
 import com.fundlink.ai.mapper.AiTaskMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,9 +27,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Agent Loop 编排器 — 状态机 + SSE 推送 + 重试控制 (设计 §3)
+ * Agent Loop 编排器 — 状态机 + 轮询状态查询 (设计 §3)
  * <p>
  * 状态转换: PENDING → ANALYZE → VALIDATE → DRYRUN → DECISION_POINT → PUBLISH → PUBLISHED
+ * <p>
+ * SSE 已移除（2026-08）：前端轮询 GET /api/ai/loop/{taskId}；
+ * 决策上下文（decisionType/summary/options）在 DECISION_POINT 时落库，人工决策先落库再完成内存 future。
  */
 @Slf4j
 @Service
@@ -43,12 +46,12 @@ public class AgentLoopOrchestrator {
     private final DiagnosisAgent diagnosisAgent;
     private final LoopTracer loopTracer;
     private final AiTaskMapper taskMapper;
-    private final LoopEventPublisher eventPublisher;
     private final ObjectMapper json = new ObjectMapper();
     private final int defaultMaxRounds;
     private final int decisionTimeoutMinutes;
+    private final String fundlinkAdminBaseUrl;
 
-    /** 等待人工决策的 CompletableFuture */
+    /** 等待人工决策的 CompletableFuture（运行时加速；决策本身已落库） */
     private final Map<Long, CompletableFuture<DecisionRequest>> pendingDecisions = new ConcurrentHashMap<>();
     /** 运行中的 LoopState */
     private final Map<Long, LoopState> runningStates = new ConcurrentHashMap<>();
@@ -59,9 +62,9 @@ public class AgentLoopOrchestrator {
                                   TemplateValidator templateValidator, FlowDryRunner flowDryRunner,
                                   TestGenAgent testGenAgent, DiagnosisAgent diagnosisAgent,
                                   LoopTracer loopTracer, AiTaskMapper taskMapper,
-                                  LoopEventPublisher eventPublisher,
                                   @Value("${fundlink.loop.max-rounds:3}") int defaultMaxRounds,
-                                  @Value("${fundlink.loop.decision-timeout-minutes:10}") int decisionTimeoutMinutes) {
+                                  @Value("${fundlink.loop.decision-timeout-minutes:10}") int decisionTimeoutMinutes,
+                                  @Value("${fundlink.admin.base-url:http://localhost:8080}") String fundlinkAdminBaseUrl) {
         this.requirementAgent = requirementAgent;
         this.configWriter = configWriter;
         this.templateValidator = templateValidator;
@@ -70,21 +73,27 @@ public class AgentLoopOrchestrator {
         this.diagnosisAgent = diagnosisAgent;
         this.loopTracer = loopTracer;
         this.taskMapper = taskMapper;
-        this.eventPublisher = eventPublisher;
         this.defaultMaxRounds = defaultMaxRounds;
         this.decisionTimeoutMinutes = decisionTimeoutMinutes;
+        this.fundlinkAdminBaseUrl = fundlinkAdminBaseUrl;
     }
 
     /** 启动闭环 — @Async 异步执行 */
     @Async
     public void start(Long taskId) {
+        // 原子抢占 PENDING → ANALYZE：并发双击/双请求下只有一次更新成功（CRITICAL-1）
+        int updated = taskMapper.update(null, Wrappers.<AiTask>lambdaUpdate()
+                .set(AiTask::getStatus, "ANALYZE")
+                .eq(AiTask::getId, taskId)
+                .eq(AiTask::getStatus, "PENDING"));
+        if (updated == 0) {
+            log.warn("[LOOP] Task {} not started — not PENDING or already claimed by another loop", taskId);
+            return;
+        }
+
         AiTask task = taskMapper.selectById(taskId);
         if (task == null) {
             log.error("[LOOP] Task not found: {}", taskId);
-            return;
-        }
-        if (!"PENDING".equals(task.getStatus())) {
-            log.warn("[LOOP] Task {} already started, status={}", taskId, task.getStatus());
             return;
         }
 
@@ -103,22 +112,31 @@ public class AgentLoopOrchestrator {
         runningStates.put(taskId, s);
         cancelFlags.put(taskId, new AtomicBoolean(false));
 
-        // Update task status
-        task.setStatus("ANALYZE");
-        taskMapper.updateById(task);
-
-        eventPublisher.phaseStart(taskId, "ANALYZE", s.round + 1, s.maxRounds);
+        log.info("[LOOP] phase:start  task={}  phase=ANALYZE  round={}/{}", taskId, s.round + 1, s.maxRounds);
 
         runLoop(s);
     }
 
-    /** 人工决策入口 */
+    /** 人工决策入口 — 先落库（重启不丢）再完成内存 future */
     public void decide(Long taskId, DecisionRequest req) {
+        try {
+            int updated = taskMapper.update(null, Wrappers.<AiTask>lambdaUpdate()
+                    .set(AiTask::getDecisionResult, req.getDecision())
+                    .set(AiTask::getDecisionTime, LocalDateTime.now())
+                    .eq(AiTask::getId, taskId));
+            if (updated == 0) {
+                log.warn("[LOOP] decide: task {} not found in DB", taskId);
+            }
+        } catch (Exception e) {
+            log.error("[LOOP] Failed to persist decision for task {}: {}", taskId, e.getMessage());
+        }
+
         CompletableFuture<DecisionRequest> future = pendingDecisions.get(taskId);
         if (future != null) {
             future.complete(req);
         } else {
-            log.warn("[LOOP] No pending decision for task {}", taskId);
+            // 决策已落库但无内存等待方（如刚重启）— 任务会被启动补偿标记 FAILED，可走 /retry
+            log.warn("[LOOP] No pending decision for task {} — decision persisted only", taskId);
         }
     }
 
@@ -157,7 +175,6 @@ public class AgentLoopOrchestrator {
                 }
             } catch (Exception e) {
                 log.error("[LOOP] Phase {} error  task={}: {}", s.phase, s.taskId, e.getMessage(), e);
-                eventPublisher.phaseError(s.taskId, s.phase.name(), e.getMessage());
 
                 // Transition to DIAGNOSE for recoverable errors
                 s.lastError = e.getMessage();
@@ -174,7 +191,6 @@ public class AgentLoopOrchestrator {
                 task.setUpdateTime(LocalDateTime.now());
                 taskMapper.updateById(task);
             }
-            eventPublisher.taskFailed(s.taskId, "用户中断", s.round + 1);
         }
         runningStates.remove(s.taskId);
         pendingDecisions.remove(s.taskId);
@@ -182,8 +198,8 @@ public class AgentLoopOrchestrator {
     }
 
     private void doAnalyze(LoopState s) {
-        log.info("[LOOP] ANALYZE  task={}  round={}/{}", s.taskId, s.round + 1, s.maxRounds);
-        eventPublisher.phaseProgress(s.taskId, "ANALYZE", "正在解析接口文档...");
+        log.info("[LOOP] ANALYZE  task={}  round={}/{}  phase:progress 正在解析接口文档...",
+                s.taskId, s.round + 1, s.maxRounds);
 
         long start = System.currentTimeMillis();
         RequirementResult result = requirementAgent.analyze(
@@ -191,7 +207,7 @@ public class AgentLoopOrchestrator {
         long duration = System.currentTimeMillis() - start;
 
         if (result.getParseError() != null) {
-            eventPublisher.phaseError(s.taskId, "ANALYZE", "LLM 解析失败: " + result.getParseError());
+            log.error("[LOOP] ANALYZE error  task={}: LLM 解析失败: {}", s.taskId, result.getParseError());
             s.lastError = "ANALYZE parse error: " + result.getParseError();
             s.phase = TaskPhase.DIAGNOSE;
             loopTracer.trace(s.taskId, s.taskNo + "-A-" + s.round, "ANALYZE", "requirement",
@@ -213,7 +229,7 @@ public class AgentLoopOrchestrator {
         ConfigWriter.WriteResult write = configWriter.writeAll(result, s.providerCode, s.flowType, s.interfaceId);
         s.writeResult = write;
         if (!write.isSuccess()) {
-            eventPublisher.phaseError(s.taskId, "ANALYZE", "配置写入失败: " + write.getError());
+            log.error("[LOOP] ANALYZE error  task={}: 配置写入失败: {}", s.taskId, write.getError());
             s.lastError = "Config write failed: " + write.getError();
             s.phase = TaskPhase.DIAGNOSE;
             loopTracer.trace(s.taskId, s.taskNo + "-A-" + s.round, "ANALYZE", "requirement",
@@ -222,12 +238,12 @@ public class AgentLoopOrchestrator {
             return;
         }
 
-        eventPublisher.phaseComplete(s.taskId, "ANALYZE",
-                String.format("解析完成: %d 字段映射, %d 流程节点 | Provider=%d, Template=%d, Flow=%d",
-                        result.getFieldMappings() != null ? result.getFieldMappings().size() : 0,
-                        result.getFlowDsl() != null && result.getFlowDsl().getNodes() != null
-                                ? result.getFlowDsl().getNodes().size() : 0,
-                        write.getProviderId(), write.getTemplateId(), write.getFlowId()));
+        String completeMsg = String.format("解析完成: %d 字段映射, %d 流程节点 | Provider=%d, Template=%d, Flow=%d",
+                result.getFieldMappings() != null ? result.getFieldMappings().size() : 0,
+                result.getFlowDsl() != null && result.getFlowDsl().getNodes() != null
+                        ? result.getFlowDsl().getNodes().size() : 0,
+                write.getProviderId(), write.getTemplateId(), write.getFlowId());
+        log.info("[LOOP] phase:complete  task={}  phase=ANALYZE  summary={}", s.taskId, completeMsg);
 
         loopTracer.trace(s.taskId, s.taskNo + "-A-" + s.round, "ANALYZE", "requirement",
                 "document len=" + (s.documentText != null ? s.documentText.length() : 0),
@@ -237,12 +253,11 @@ public class AgentLoopOrchestrator {
         persistTask(s, "VALIDATE");
 
         s.phase = TaskPhase.VALIDATE;
-        eventPublisher.phaseStart(s.taskId, "VALIDATE", s.round + 1, s.maxRounds);
+        log.info("[LOOP] phase:start  task={}  phase=VALIDATE  round={}/{}", s.taskId, s.round + 1, s.maxRounds);
     }
 
     private void doValidate(LoopState s) {
-        log.info("[LOOP] VALIDATE  task={}", s.taskId);
-        eventPublisher.phaseProgress(s.taskId, "VALIDATE", "生成测试数据并验证模板渲染...");
+        log.info("[LOOP] VALIDATE  task={}  phase:progress 生成测试数据并验证模板渲染...", s.taskId);
 
         RequirementResult rr = s.currentResult;
         if (rr == null || s.writeResult == null) {
@@ -259,7 +274,7 @@ public class AgentLoopOrchestrator {
         s.testGen = testGen;
 
         if (testGen.getParseError() != null) {
-            eventPublisher.phaseError(s.taskId, "VALIDATE", "TestGen 失败: " + testGen.getParseError());
+            log.error("[LOOP] VALIDATE error  task={}: TestGen 失败: {}", s.taskId, testGen.getParseError());
             s.lastError = "TestGen error: " + testGen.getParseError();
             s.phase = TaskPhase.DIAGNOSE;
             return;
@@ -278,7 +293,7 @@ public class AgentLoopOrchestrator {
         long duration = System.currentTimeMillis() - start;
 
         if (!vr.isSuccess()) {
-            eventPublisher.phaseError(s.taskId, "VALIDATE", "模板验证失败: " + vr.getErrorMsg());
+            log.error("[LOOP] VALIDATE error  task={}: 模板验证失败: {}", s.taskId, vr.getErrorMsg());
             s.lastError = "VALIDATE: " + vr.getErrorMsg();
             s.validationError = vr;
             s.phase = TaskPhase.DIAGNOSE;
@@ -287,8 +302,8 @@ public class AgentLoopOrchestrator {
             return;
         }
 
-        eventPublisher.phaseComplete(s.taskId, "VALIDATE",
-                "模板渲染验证通过, testCases=" + (testGen.getTestCases() != null ? testGen.getTestCases().size() : 0));
+        log.info("[LOOP] phase:complete  task={}  phase=VALIDATE  summary=模板渲染验证通过, testCases={}",
+                s.taskId, testGen.getTestCases() != null ? testGen.getTestCases().size() : 0);
 
         loopTracer.trace(s.taskId, s.taskNo + "-V-" + s.round, "VALIDATE", "testgen",
                 "templateId=" + templateId, "OK", null, duration, true, null);
@@ -296,12 +311,11 @@ public class AgentLoopOrchestrator {
         persistTask(s, "DRYRUN");
 
         s.phase = TaskPhase.DRYRUN;
-        eventPublisher.phaseStart(s.taskId, "DRYRUN", s.round + 1, s.maxRounds);
+        log.info("[LOOP] phase:start  task={}  phase=DRYRUN  round={}/{}", s.taskId, s.round + 1, s.maxRounds);
     }
 
     private void doDryRun(LoopState s) {
-        log.info("[LOOP] DRYRUN  task={}", s.taskId);
-        eventPublisher.phaseProgress(s.taskId, "DRYRUN", "正在干跑测试流程...");
+        log.info("[LOOP] DRYRUN  task={}  phase:progress 正在干跑测试流程...", s.taskId);
 
         RequirementResult rr = s.currentResult;
         TestGenResult tg = s.testGen;
@@ -320,7 +334,7 @@ public class AgentLoopOrchestrator {
 
         // Ensure flow is published before dry-run (defensive — FundLink creates with status=1 already)
         try {
-            URI pubUri = new URI("http://localhost:8080/api/admin/flows/" + flowId + "/publish");
+            URI pubUri = new URI(fundlinkAdminBaseUrl + "/api/admin/flows/" + flowId + "/publish");
             HttpURLConnection pubConn = (HttpURLConnection) pubUri.toURL().openConnection();
             pubConn.setRequestMethod("PUT");
             pubConn.setRequestProperty("Content-Type", "application/json");
@@ -344,7 +358,7 @@ public class AgentLoopOrchestrator {
         s.dryRun = dr;
 
         if (!dr.isSuccess()) {
-            eventPublisher.phaseError(s.taskId, "DRYRUN", "干跑失败: " + dr.getErrorMsg());
+            log.error("[LOOP] DRYRUN error  task={}: 干跑失败: {}", s.taskId, dr.getErrorMsg());
             s.lastError = "DRYRUN: " + dr.getErrorMsg();
             s.phase = TaskPhase.DIAGNOSE;
             loopTracer.trace(s.taskId, s.taskNo + "-D-" + s.round, "DRYRUN", "dryrunner",
@@ -353,7 +367,8 @@ public class AgentLoopOrchestrator {
         }
 
         int branchCount = dr.getBranches() != null ? dr.getBranches().size() : 0;
-        eventPublisher.phaseComplete(s.taskId, "DRYRUN", "干跑通过: " + branchCount + " 个分支全部成功");
+        log.info("[LOOP] phase:complete  task={}  phase=DRYRUN  summary=干跑通过: {} 个分支全部成功",
+                s.taskId, branchCount);
 
         loopTracer.trace(s.taskId, s.taskNo + "-D-" + s.round, "DRYRUN", "dryrunner",
                 "flowId=" + flowId + " branches=" + branchCount, "OK", null, duration, true, null);
@@ -396,7 +411,7 @@ public class AgentLoopOrchestrator {
                     ? s.lastDiagnosis : createErrorDiag(s.lastError));
             s.phase = TaskPhase.ANALYZE;
             persistTask(s, "ANALYZE");
-            eventPublisher.phaseStart(s.taskId, "ANALYZE", s.round + 1, s.maxRounds);
+            log.info("[LOOP] phase:start  task={}  phase=ANALYZE  round={}/{}", s.taskId, s.round + 1, s.maxRounds);
             return;
         }
         // Max rounds exhausted
@@ -420,9 +435,14 @@ public class AgentLoopOrchestrator {
                     : "验证失败: " + (s.lastError != null ? s.lastError : "未知错误");
             options = List.of("SKIP", "EDIT_AND_RETRY", "ABORT");
         }
+        s.decisionSummary = summary;
+        s.decisionOptions = options;
 
+        // 决策上下文落库 — 轮询模式下前端从 GET /{taskId} 读取
         persistTask(s, "DECISION_POINT");
-        eventPublisher.decisionRequired(s.taskId, s.decisionType, summary, options);
+        persistDecisionContext(s);
+        log.info("[LOOP] decision_required  task={}  type={}  summary={}  options={}",
+                s.taskId, s.decisionType, summary, options);
 
         // Wait for human decision
         CompletableFuture<DecisionRequest> future = new CompletableFuture<>();
@@ -447,7 +467,7 @@ public class AgentLoopOrchestrator {
                         : createErrorDiag(s.lastError));
                 s.phase = TaskPhase.ANALYZE;
                 persistTask(s, "ANALYZE");
-                eventPublisher.phaseStart(s.taskId, "ANALYZE", s.round + 1, s.maxRounds);
+                log.info("[LOOP] phase:start  task={}  phase=ANALYZE  round={}/{}", s.taskId, s.round + 1, s.maxRounds);
             }
             case "SKIP" -> {
                 // Continue to publish if coming from VALIDATE skip
@@ -471,7 +491,8 @@ public class AgentLoopOrchestrator {
                     } else {
                         s.phase = TaskPhase.VALIDATE;
                         persistTask(s, "VALIDATE");
-                        eventPublisher.phaseStart(s.taskId, "VALIDATE", s.round + 1, s.maxRounds);
+                        log.info("[LOOP] phase:start  task={}  phase=VALIDATE  round={}/{}",
+                                s.taskId, s.round + 1, s.maxRounds);
                     }
                 } else {
                     // 无编辑内容 — 纯重试
@@ -479,7 +500,8 @@ public class AgentLoopOrchestrator {
                             : createErrorDiag(s.lastError));
                     s.phase = TaskPhase.ANALYZE;
                     persistTask(s, "ANALYZE");
-                    eventPublisher.phaseStart(s.taskId, "ANALYZE", s.round + 1, s.maxRounds);
+                    log.info("[LOOP] phase:start  task={}  phase=ANALYZE  round={}/{}",
+                            s.taskId, s.round + 1, s.maxRounds);
                 }
             }
             case "PUBLISH" -> {
@@ -498,7 +520,7 @@ public class AgentLoopOrchestrator {
         if (s.writeResult != null && s.writeResult.getFlowId() != null) {
             try {
                 // PUT /api/admin/flows/{id}/publish — idempotent (flows already status=1)
-                URI uri = new URI("http://localhost:8080/api/admin/flows/"
+                URI uri = new URI(fundlinkAdminBaseUrl + "/api/admin/flows/"
                         + s.writeResult.getFlowId() + "/publish");
                 HttpURLConnection conn = (HttpURLConnection) uri.toURL().openConnection();
                 conn.setRequestMethod("PUT");
@@ -513,13 +535,7 @@ public class AgentLoopOrchestrator {
             }
         }
 
-        // Write back successful diagnosis to RAG
-        if (s.lastDiagnosis != null && s.lastDiagnosis.getConfidence() >= 0.7) {
-            AiTask task = taskMapper.selectById(s.taskId);
-            if (task != null) {
-                loopTracer.writebackKnowledge(task, s.lastDiagnosis);
-            }
-        }
+        // 数据飞轮已切断（2026-08）：不再回写 RAG
 
         s.phase = TaskPhase.PUBLISHED;
         persistTask(s, "PUBLISHED");
@@ -528,14 +544,14 @@ public class AgentLoopOrchestrator {
                 ? String.format(" | Template #%d | Flow #%d | %d 字段映射",
                     wr.getTemplateId(), wr.getFlowId(), wr.getMappingCount())
                 : "";
-        eventPublisher.taskComplete(s.taskId, "PUBLISHED",
-                String.format("闭环完成 (共 %d 轮)%s", s.round + 1, writeInfo));
+        log.info("[LOOP] task:complete  task={}  status=PUBLISHED  summary=闭环完成 (共 {} 轮){}",
+                s.taskId, s.round + 1, writeInfo);
     }
 
     private void taskFailed(LoopState s, String reason) {
         s.phase = TaskPhase.FAILED;
         persistTask(s, "FAILED");
-        eventPublisher.taskFailed(s.taskId, reason, s.round + 1);
+        log.error("[LOOP] task:failed  task={}  error={}  rounds={}", s.taskId, reason, s.round + 1);
     }
 
     private void persistTask(LoopState s, String status) {
@@ -568,6 +584,27 @@ public class AgentLoopOrchestrator {
         }
     }
 
+    /** 决策上下文落库（含重置上一次决策结果）— 轮询模式下前端唯一的决策信息来源 */
+    private void persistDecisionContext(LoopState s) {
+        try {
+            String optionsJson;
+            try {
+                optionsJson = json.writeValueAsString(s.decisionOptions != null ? s.decisionOptions : List.of());
+            } catch (Exception e) {
+                optionsJson = "[]";
+            }
+            taskMapper.update(null, Wrappers.<AiTask>lambdaUpdate()
+                    .set(AiTask::getDecisionType, s.decisionType)
+                    .set(AiTask::getDecisionSummary, s.decisionSummary)
+                    .set(AiTask::getDecisionOptions, optionsJson)
+                    .set(AiTask::getDecisionResult, null)   // 新决策点重置上次决策
+                    .set(AiTask::getDecisionTime, null)
+                    .eq(AiTask::getId, s.taskId));
+        } catch (Exception e) {
+            log.error("[LOOP] Failed to persist decision context for task {}: {}", s.taskId, e.getMessage());
+        }
+    }
+
     private DiagnosisResult createErrorDiag(String error) {
         DiagnosisResult d = new DiagnosisResult();
         d.setPhase("ANALYZE");
@@ -591,6 +628,8 @@ public class AgentLoopOrchestrator {
         int maxRounds;
         TaskPhase phase;
         String decisionType;
+        String decisionSummary;
+        List<String> decisionOptions;
         String lastError;
         RequirementResult currentResult;
         ConfigWriter.WriteResult writeResult;

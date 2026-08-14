@@ -4,8 +4,14 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "base", "value": "http://localhost:8081" },
-    { "key": "taskId", "value": "" }
+    {
+      "key": "base",
+      "value": "http://localhost:8081"
+    },
+    {
+      "key": "taskId",
+      "value": ""
+    }
   ],
   "item": [
     {
@@ -30,14 +36,26 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"documentText\": \"# 招商银行 — 信贷放款接口文档\\n\\n> 版本: V2.1 | 日期: 2026-07-15\\n\\n## 接口概述\\n\\n| 项目 | 说明 |\\n|------|------|\\n| 接口名称 | 信贷放款申请 |\\n| 请求地址 | POST /api/credit/loan/apply |\\n| 请求方式 | POST |\\n| 报文格式 | JSON |\\n\\n## 请求参数\\n\\n| 字段名 | 类型 | 必填 | 说明 |\\n|--------|------|------|------|\\n| loanNo | String(32) | 是 | 贷款编号 |\\n| custName | String(64) | 是 | 客户姓名 |\\n| certType | String(2) | 是 | 证件类型：01-身份证 02-护照 |\\n| certNo | String(32) | 是 | 证件号码 |\\n| mobile | String(11) | 是 | 手机号 |\\n| applyAmount | String(16) | 是 | 申请金额(元) |\\n| loanTerm | String(4) | 是 | 贷款期限(月) |\\n| loanRate | String(8) | 是 | 年化利率 |\\n| rateType | String(1) | 是 | 利率类型：1-固定 2-浮动 |\\n| repayMethod | String(2) | 是 | 还款方式：01-等额本息 02-等额本金 |\\n| loanPurpose | String(4) | 是 | 贷款用途 |\\n| bankCardNo | String(19) | 是 | 收款银行卡号 |\\n| bankCode | String(8) | 是 | 收款银行联行号 |\\n| bankName | String(64) | 是 | 收款银行名称 |\\n| annualIncome | String(12) | 否 | 年收入(元) |\\n| education | String(2) | 否 | 学历 |\\n\\n## 业务流程\\n\\n风控校验 → 获取客户信息 → 渲染报文 → 条件判断(风控=A?)\\n  ├─是→ 发送银行 → 放款成功\\n  └─否→ 转人工审核\\n\",\n  \"providerCode\": \"CMB\"\n}"
             },
             "url": {
               "raw": "{{base}}/api/ai/analyze",
-              "host": ["{{base}}"], "path": ["api","ai","analyze"]
+              "host": [
+                "{{base}}"
+              ],
+              "path": [
+                "api",
+                "ai",
+                "analyze"
+              ]
             }
           }
         },
@@ -60,7 +78,12 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"result\": {{analyze_response}},\n  \"providerCode\": \"CMB\",\n  \"flowType\": \"LOAN\"\n}"
@@ -69,7 +92,14 @@
           },
           "url": {
             "raw": "{{base}}/api/ai/apply",
-            "host": ["{{base}}"], "path": ["api","ai","apply"]
+            "host": [
+              "{{base}}"
+            ],
+            "path": [
+              "api",
+              "ai",
+              "apply"
+            ]
           }
         }
       ]
@@ -87,8 +117,8 @@
                   "var data = pm.response.json();",
                   "if (data.code === 0) {",
                   "    pm.collectionVariables.set('taskId', data.data.taskId);",
-                  "    console.log('✅ Task created — id=' + data.data.taskId + ' no=' + data.data.taskNo);",
-                  "    console.log('👉 Now open step 2 (SSE Stream) in a browser or use curl');",
+                  "    console.log('✅ Task created & started — id=' + data.data.taskId + ' no=' + data.data.taskNo);",
+                  "    console.log('👉 Now poll step 2 (Poll Task Status) every 1-2s');",
                   "} else {",
                   "    console.log('❌ ' + data.msg);",
                   "}"
@@ -98,33 +128,59 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"documentText\": \"# 招商银行 — 信贷放款接口文档\\n\\n> 版本: V2.1 | 日期: 2026-07-15\\n\\n## 接口概述\\n\\n| 项目 | 说明 |\\n|------|------|\\n| 接口名称 | 信贷放款申请 |\\n| 请求地址 | POST /api/credit/loan/apply |\\n| 请求方式 | POST |\\n| 报文格式 | JSON |\\n\\n## 请求参数\\n\\n| 字段名 | 类型 | 必填 | 说明 |\\n|--------|------|------|------|\\n| loanNo | String(32) | 是 | 贷款编号 |\\n| custName | String(64) | 是 | 客户姓名 |\\n| certType | String(2) | 是 | 证件类型：01-身份证 02-护照 |\\n| certNo | String(32) | 是 | 证件号码 |\\n| mobile | String(11) | 是 | 手机号 |\\n| applyAmount | String(16) | 是 | 申请金额(元) |\\n| loanTerm | String(4) | 是 | 贷款期限(月) |\\n| loanRate | String(8) | 是 | 年化利率 |\\n| rateType | String(1) | 是 | 利率类型：1-固定 2-浮动 |\\n| repayMethod | String(2) | 是 | 还款方式：01-等额本息 02-等额本金 |\\n| loanPurpose | String(4) | 是 | 贷款用途 |\\n| bankCardNo | String(19) | 是 | 收款银行卡号 |\\n| bankCode | String(8) | 是 | 收款银行联行号 |\\n| bankName | String(64) | 是 | 收款银行名称 |\\n| annualIncome | String(12) | 否 | 年收入(元) |\\n| education | String(2) | 否 | 学历 |\\n\\n## 业务流程\\n\\n风控校验 → 获取客户信息 → 渲染报文 → 条件判断(风控=A?)\\n  ├─是→ 发送银行 → 放款成功\\n  └─否→ 转人工审核\\n\",\n  \"providerCode\": \"CMB\",\n  \"flowType\": \"LOAN\"\n}"
             },
             "url": {
               "raw": "{{base}}/api/ai/loop",
-              "host": ["{{base}}"], "path": ["api","ai","loop"]
+              "host": [
+                "{{base}}"
+              ],
+              "path": [
+                "api",
+                "ai",
+                "loop"
+              ]
             }
           }
         },
         {
-          "name": "2. SSE Stream (Events)",
+          "name": "2. Poll Task Status (轮询)",
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{base}}/api/ai/loop/{{taskId}}/stream",
-              "host": ["{{base}}"], "path": ["api","ai","loop","{{taskId}}","stream"]
+              "raw": "{{base}}/api/ai/loop/{{taskId}}",
+              "host": [
+                "{{base}}"
+              ],
+              "path": [
+                "api",
+                "ai",
+                "loop",
+                "{{taskId}}"
+              ]
             },
-            "description": "⚠️ Postman 原生不支持 SSE。用这个 curl 命令代替：\n\ncurl -N http://localhost:8081/api/ai/loop/{{taskId}}/stream\n\n或用浏览器直接打开这个 URL。\n\nSSE 事件类型：\n  phase:start     — {phase, round, maxRounds}\n  phase:progress  — {phase, message}\n  phase:complete  — {phase, summary}\n  phase:error     — {phase, message}\n  decision_required — {type, summary, options}\n  task:complete   — {status, summary}\n  task:failed     — {status, error, rounds}"
-          }
+            "description": "轮询模式（SSE 已移除）：每 1-2s 调一次本接口。\n响应：{code:0, data:{taskId, status, currentRound, maxRounds, decisionType?, decisionSummary?, decisionOptions?}}\nstatus=DECISION_POINT 时 data 附带决策上下文（options 列表），据此调 3. Send Decision。\n终态：PUBLISHED / FAILED / ABORTED。\n重启后卡死的中间态任务由启动补偿标为 FAILED，可 POST /api/ai/loop/{{taskId}}/retry 重试。"
+          },
+          "response": []
         },
         {
           "name": "3. Send Decision",
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"taskId\": {{taskId}},\n  \"decision\": \"RETRY\",\n  \"comment\": \"让AI修正\"\n}"
@@ -133,7 +189,16 @@
           },
           "url": {
             "raw": "{{base}}/api/ai/loop/{{taskId}}/decide",
-            "host": ["{{base}}"], "path": ["api","ai","loop","{{taskId}}","decide"]
+            "host": [
+              "{{base}}"
+            ],
+            "path": [
+              "api",
+              "ai",
+              "loop",
+              "{{taskId}}",
+              "decide"
+            ]
           }
         },
         {
@@ -142,7 +207,15 @@
             "method": "GET",
             "url": {
               "raw": "{{base}}/api/ai/loop/{{taskId}}",
-              "host": ["{{base}}"], "path": ["api","ai","loop","{{taskId}}"]
+              "host": [
+                "{{base}}"
+              ],
+              "path": [
+                "api",
+                "ai",
+                "loop",
+                "{{taskId}}"
+              ]
             }
           }
         }
@@ -155,16 +228,44 @@
           "name": "FundLink Backend (8080)",
           "request": {
             "method": "GET",
-            "url": { "raw": "http://localhost:8080/api/admin/providers?page=1&size=1", "host": ["localhost:8080"], "path": ["api","admin","providers"] }
+            "url": {
+              "raw": "http://localhost:8080/api/admin/providers?page=1&size=1",
+              "host": [
+                "localhost:8080"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "providers"
+              ]
+            }
           }
         },
         {
           "name": "AI Backend (8081)",
           "request": {
             "method": "POST",
-            "header": [{"key": "Content-Type", "value": "application/json"}],
-            "body": { "mode": "raw", "raw": "{\"documentText\":\"ping\",\"providerCode\":\"TEST\"}" },
-            "url": { "raw": "{{base}}/api/ai/analyze", "host": ["{{base}}"], "path": ["api","ai","analyze"] }
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"documentText\":\"ping\",\"providerCode\":\"TEST\"}"
+            },
+            "url": {
+              "raw": "{{base}}/api/ai/analyze",
+              "host": [
+                "{{base}}"
+              ],
+              "path": [
+                "api",
+                "ai",
+                "analyze"
+              ]
+            }
           }
         }
       ]

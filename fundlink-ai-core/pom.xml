@@ -16,12 +16,6 @@
     <description>AI核心模块：LLM网关 + Agent引擎 + 反馈系统</description>
 
     <dependencies>
-        <!-- Spring AI -->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-openai-spring-boot-starter</artifactId>
-        </dependency>
-
 <!-- LLM 调用使用 JDK 17 java.net.http.HttpClient，无额外框架依赖 -->
 
         <!-- MyBatis-Plus -->

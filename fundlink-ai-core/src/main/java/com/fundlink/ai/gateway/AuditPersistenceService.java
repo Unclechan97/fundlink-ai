@@ -30,18 +30,18 @@ public class AuditPersistenceService {
             @Value("${fundlink.llm.providers.qwen.output-price:0.008}") BigDecimal qwenOutputPrice,
             @Value("${fundlink.llm.providers.deepseek.input-price:0.00015}") BigDecimal dsInputPrice,
             @Value("${fundlink.llm.providers.deepseek.output-price:0.0006}") BigDecimal dsOutputPrice,
-            @Value("${fundlink.llm.providers.claude.input-price:0.0008}") BigDecimal claudeInputPrice,
-            @Value("${fundlink.llm.providers.claude.output-price:0.004}") BigDecimal claudeOutputPrice) {
+            @Value("${fundlink.llm.providers.siliconflow.input-price:0}") BigDecimal sfInputPrice,
+            @Value("${fundlink.llm.providers.siliconflow.output-price:0}") BigDecimal sfOutputPrice) {
         this.auditMapper = auditMapper;
         this.inputPrices = Map.of(
                 "qwen", qwenInputPrice,
                 "deepseek", dsInputPrice,
-                "claude", claudeInputPrice
+                "siliconflow", sfInputPrice
         );
         this.outputPrices = Map.of(
                 "qwen", qwenOutputPrice,
                 "deepseek", dsOutputPrice,
-                "claude", claudeOutputPrice
+                "siliconflow", sfOutputPrice
         );
     }
 

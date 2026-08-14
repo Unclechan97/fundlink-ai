@@ -15,7 +15,10 @@ import java.util.List;
  * 问题排查意图处理器。
  * <p>
  * 用户贴入报错日志 → 创建 ai_task → RAG 检索 → Tool Calling 诊断
- * → 写 ai_agent_trace → 回写 RAG 知识库 → 返回诊断结果。
+ * → 写 ai_agent_trace → 返回诊断结果。
+ * <p>
+ * 数据飞轮已切断（2026-08）：不再回写 RAG；
+ * RAG 不可用时直接返回"知识库暂不可用"，不拿着空上下文生成诊断。
  */
 @Slf4j
 public class TroubleshootingHandler implements IntentHandler {
@@ -59,30 +62,31 @@ public class TroubleshootingHandler implements IntentHandler {
 
             // ── 3. RAG 检索历史案例 ──
             long ragStart = System.currentTimeMillis();
-            List<String> ragExamples = List.of();
-            boolean ragSuccess = true;
-            String ragError = null;
-            try {
-                ragExamples = ragGateway.search(errorLog, 3);
-                log.info("[Troubleshoot] RAG returned {} examples  taskId={}",
-                        ragExamples.size(), taskId);
-            } catch (Exception e) {
-                ragSuccess = false;
-                ragError = e.getMessage();
-                log.warn("[Troubleshoot] RAG search failed: {}", e.getMessage());
-            }
+            RagGateway.SearchResult ragResult = ragGateway.search(errorLog, 3);
+            List<String> ragExamples = ragResult.getResults();
+            boolean ragAvailable = ragResult.isAvailable();
+            log.info("[Troubleshoot] RAG returned {} examples  available={}  taskId={}",
+                    ragExamples.size(), ragAvailable, taskId);
 
             // Trace: RAG 检索阶段
             long ragDuration = System.currentTimeMillis() - ragStart;
-            String ragSummary = ragExamples.isEmpty()
-                    ? "未找到历史案例"
+            String ragSummary = !ragAvailable
+                    ? "知识库暂不可用"
+                    : ragExamples.isEmpty() ? "未找到历史案例"
                     : "找到 " + ragExamples.size() + " 个历史案例";
             String ragInputText = "用户报错日志 (截断): " + (errorLog != null
                     ? errorLog.substring(0, Math.min(300, errorLog.length())) : "");
             loopTracer.trace(taskId, traceId, "RAG_SEARCH", "troubleshoot",
                     ragInputText, ragSummary,
-                    ragInputText, ragSuccess ? ragSummary : ("RAG 检索失败: " + ragError),
-                    null, null, ragDuration, ragSuccess, ragError);
+                    ragInputText, ragSummary,
+                    null, null, ragDuration, ragAvailable, ragAvailable ? null : "RAG 不可用");
+
+            // RAG 不可用时不得拿着空上下文继续生成诊断 — 直接向用户明示
+            if (!ragAvailable) {
+                String notice = "知识库暂不可用，无法检索历史案例进行诊断，请稍后重试。";
+                recorder.markFailed(taskId, notice);
+                return TroubleshootResult.of(taskId, notice);
+            }
 
             // ── 4. 构建系统 Prompt ──
             String systemPrompt = buildSystemPrompt();
@@ -122,13 +126,9 @@ public class TroubleshootingHandler implements IntentHandler {
 
             String analysis = toolLoop.run(systemPrompt, userPrompt, traceId, traceListener);
 
-            // ── 6. 成功 → 更新任务 + 回写 RAG ──
+            // ── 6. 成功 → 更新任务（数据飞轮已切断，不回写 RAG） ──
             long totalDuration = System.currentTimeMillis() - startTime;
             recorder.markCompleted(taskId, analysis, ragExamples.size(), currentRound[0]);
-
-            // 写回 RAG 知识库
-            task.setProviderCode(providerCode);
-            loopTracer.writebackTroubleshootKnowledge(task, analysis, ragExamples.size());
 
             // Trace: 整体完成
             loopTracer.trace(taskId, traceId, "DIAG_COMPLETE", "troubleshoot",

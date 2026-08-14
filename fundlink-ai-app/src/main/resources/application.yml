@@ -30,16 +30,11 @@ fundlink:
         default-model: deepseek-chat
         input-price: 0.00015    # USD/1K tokens (deepseek-chat)
         output-price: 0.0006
-      claude:
-        base-url: https://api.anthropic.com/v1
-        api-key: ${ANTHROPIC_API_KEY:}
-        default-model: claude-haiku-4-5-20251001
-        input-price: 0.0008     # USD/1K tokens (claude-haiku)
-        output-price: 0.004
       qwen:
         base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
         api-key: ${QWEN_API_KEY:}
-        default-model: qwen-plus
+        # 注意: qwen provider 指向 deepseek 模型是有意配置，勿"修复"
+        default-model: deepseek-v4-flash
         input-price: 0.002      # USD/1K tokens (qwen-plus)
         output-price: 0.008
       siliconflow:
@@ -54,20 +49,20 @@ fundlink:
 
     # 路由策略
     router:
-      default-provider: qwen
-      default-model: qwen-plus
-      fallback-chain: qwen,siliconflow,deepseek
+      default-provider: deepseek
+      default-model: deepseek-chat
+      fallback-chain: deepseek,qwen,siliconflow
       retry-max: 2
       task-routing:
         simple:
           provider: siliconflow
           model: Qwen/Qwen3-8B
         requirement:
-          provider: qwen
-          model: qwen-plus
+          provider: deepseek
+          model: deepseek-chat
         testgen:
-          provider: qwen
-          model: qwen-plus
+          provider: deepseek
+          model: deepseek-chat
         diagnosis:
           provider: siliconflow
           model: Qwen/Qwen3-8B
@@ -75,6 +70,8 @@ fundlink:
   # RAG 服务地址
   rag:
     base-url: http://localhost:8000
+    # 服务间内部密钥（与 RAG 侧 RAG_INTERNAL_KEY 同值）；未配置时 WARN 并继续直连
+    internal-key: ${RAG_INTERNAL_KEY:}
   # FundLink 服务地址（调现有 API 写入配置）
   admin:
     base-url: http://localhost:8080
@@ -82,11 +79,10 @@ fundlink:
   loop:
     max-rounds: 3                   # 最大重试轮数
     decision-timeout-minutes: 10    # 人工决策等待超时
-
-  # SSE 流式推送配置
-  sse:
-    timeout-ms: 3600000     # SseEmitter 超时 2h（对齐 LLM 20min + fallback chain + 决策等待）
-    heartbeat-ms: 25000     # 心跳间隔 25s（防止浏览器/proxy 断连）
+    # 线程池：核心 4 / 上限 16 / 队列 64 / CallerRunsPolicy（拒绝时回退调用线程）
+    core-pool-size: 4
+    max-pool-size: 16
+    queue-capacity: 64
 
 logging:
   level:

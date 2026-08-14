@@ -66,6 +66,23 @@ public class AiTask {
     /** 接口名称（如 "放款申请"） */
     private String interfaceName;
 
+    // ── 决策上下文（DECISION_POINT 时落库，轮询模式下前端从此读取） ──
+
+    /** 决策类型: PUBLISH_CONFIRM / RECOVERY_EXHAUSTED */
+    private String decisionType;
+
+    /** 决策摘要（展示给用户） */
+    private String decisionSummary;
+
+    /** 决策选项列表 (JSON 数组字符串，如 ["PUBLISH","ABORT"]) */
+    private String decisionOptions;
+
+    /** 用户已提交的决策: RETRY / SKIP / EDIT_AND_RETRY / ABORT / PUBLISH */
+    private String decisionResult;
+
+    /** 决策提交时间 */
+    private LocalDateTime decisionTime;
+
     private LocalDateTime createTime;
 
     private LocalDateTime updateTime;

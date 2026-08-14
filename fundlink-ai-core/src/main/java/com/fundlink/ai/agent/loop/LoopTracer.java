@@ -1,9 +1,6 @@
 package com.fundlink.ai.agent.loop;
 
-import com.fundlink.ai.agent.diagnosis.DiagnosisResult;
 import com.fundlink.ai.entity.AiAgentTrace;
-import com.fundlink.ai.entity.AiTask;
-import com.fundlink.ai.gateway.RagGateway;
 import com.fundlink.ai.gateway.TokenUsage;
 import com.fundlink.ai.mapper.AiAgentTraceMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -12,18 +9,18 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 
 /**
- * Loop 追踪器 — 记录每轮执行轨迹 + RAG 知识回写 (设计 §9)
+ * Loop 追踪器 — 记录每轮执行轨迹 (设计 §9)
+ * <p>
+ * 数据飞轮已切断（2026-08）：不再回写 RAG 知识库，仅保留轨迹记录。
  */
 @Slf4j
 @Service
 public class LoopTracer {
 
     private final AiAgentTraceMapper traceMapper;
-    private final RagGateway ragGateway;
 
-    public LoopTracer(AiAgentTraceMapper traceMapper, RagGateway ragGateway) {
+    public LoopTracer(AiAgentTraceMapper traceMapper) {
         this.traceMapper = traceMapper;
-        this.ragGateway = ragGateway;
     }
 
     /**
@@ -146,93 +143,5 @@ public class LoopTracer {
         }
         sb.append('"');
         return sb.toString();
-    }
-
-    /**
-     * 修正成功 → RAG 知识回写
-     */
-    public void writebackKnowledge(AiTask task, DiagnosisResult diagnosis) {
-        if (diagnosis == null || diagnosis.getRootCause() == null) return;
-
-        try {
-            String markdown = String.format("""
-                ## 闭环修正规则
-                - **类型**: DIAGNOSIS_FIX
-                - **阶段**: %s
-                - **根因**: %s
-                - **修正建议**: %s
-                - **资金方**: %s
-                - **来源**: Agent Loop 闭环自动修正
-                """,
-                    diagnosis.getPhase(),
-                    diagnosis.getRootCause(),
-                    diagnosis.getFixSuggestion() != null ? diagnosis.getFixSuggestion() : "",
-                    task.getProviderCode() != null ? task.getProviderCode() : "UNKNOWN");
-
-            boolean ok = ragGateway.upsertKnowledge("DIAGNOSIS_FIX",
-                    task.getProviderCode(), markdown);
-            if (ok) {
-                log.info("[TRACE] Knowledge written back to RAG  task={}  rootCause={}",
-                        task.getId(), diagnosis.getRootCause().substring(0,
-                                Math.min(60, diagnosis.getRootCause().length())));
-            }
-        } catch (Exception e) {
-            log.error("[TRACE] Knowledge writeback failed: {}", e.getMessage());
-        }
-    }
-
-    /**
-     * 排查结果 → RAG 知识回写。
-     * <p>
-     * 将排查诊断结果作为案例写入知识库，供后续排查时检索参考。
-     *
-     * @param task     排查任务（需含 errorLog / providerCode 等）
-     * @param analysis LLM 诊断结果全文
-     * @param ragCount RAG 检索到的历史案例数
-     */
-    public void writebackTroubleshootKnowledge(AiTask task, String analysis, int ragCount) {
-        if (analysis == null || analysis.isBlank()) return;
-
-        try {
-            // 截断分析文本避免 markdown 过大
-            String summary = analysis.length() > 500
-                    ? analysis.substring(0, 500) + "..."
-                    : analysis;
-
-            String providerCode = task.getProviderCode() != null
-                    ? task.getProviderCode() : "UNKNOWN";
-
-            String errorSnippet = "";
-            if (task.getDocumentText() != null && !task.getDocumentText().isBlank()) {
-                errorSnippet = task.getDocumentText().length() > 200
-                        ? task.getDocumentText().substring(0, 200) + "..."
-                        : task.getDocumentText();
-            }
-
-            String markdown = String.format("""
-                ## 排查案例
-                - **类型**: TROUBLESHOOT_CASE
-                - **资金方**: %s
-                - **检索到历史案例**: %d 条
-                - **错误摘要**: %s
-                - **诊断结果**: %s
-                - **来源**: AI 问题排查自动归档
-                - **关联任务**: %s
-                """,
-                    providerCode,
-                    ragCount,
-                    errorSnippet.replace("\n", " ").replace("\r", ""),
-                    summary.replace("\n", " ").replace("\r", ""),
-                    task.getTaskNo() != null ? task.getTaskNo() : "DIAG-UNKNOWN");
-
-            boolean ok = ragGateway.upsertKnowledge("TROUBLESHOOT_CASE",
-                    providerCode, markdown);
-            if (ok) {
-                log.info("[TRACE] Troubleshoot knowledge written to RAG  task={}  taskNo={}",
-                        task.getId(), task.getTaskNo());
-            }
-        } catch (Exception e) {
-            log.error("[TRACE] Troubleshoot knowledge writeback failed: {}", e.getMessage());
-        }
     }
 }

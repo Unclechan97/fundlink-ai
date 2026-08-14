@@ -1,7 +1,6 @@
 package com.fundlink.ai.agent.split;
 
 import com.fundlink.ai.agent.PromptBuilder;
-import com.fundlink.ai.agent.loop.LoopEventPublisher;
 import com.fundlink.ai.agent.loop.MultiInterfaceOrchestrator;
 import com.fundlink.ai.agent.requirement.MultiInterfaceResult;
 import com.fundlink.ai.agent.requirement.ProviderConfig;
@@ -106,17 +105,8 @@ class EndToEndMultiInterfaceTest {
         };
 
         Executor syncExecutor = Runnable::run;
-        LoopEventPublisher stubEvents = new LoopEventPublisher() {
-            @Override public void phaseStart(Long t, String p, int r, int m) {}
-            @Override public void phaseProgress(Long t, String p, String msg) {}
-            @Override public void phaseComplete(Long t, String p, String s) {}
-            @Override public void phaseError(Long t, String p, String msg) {}
-            @Override public void decisionRequired(Long t, String ty, String s, java.util.List<String> o) {}
-            @Override public void taskComplete(Long t, String s, String sum) {}
-            @Override public void taskFailed(Long t, String e, int r) {}
-        };
         orchestrator = new MultiInterfaceOrchestrator(
-                stubAgent, null, new PromptBuilder(), stubEvents, syncExecutor);
+                stubAgent, null, new PromptBuilder(), syncExecutor);
     }
 
     // ═══════════════════════════════════════════════
@@ -197,17 +187,8 @@ class EndToEndMultiInterfaceTest {
         };
 
         Executor syncExecutor = Runnable::run;
-        LoopEventPublisher stubEvents = new LoopEventPublisher() {
-            @Override public void phaseStart(Long t, String p, int r, int m) {}
-            @Override public void phaseProgress(Long t, String p, String msg) {}
-            @Override public void phaseComplete(Long t, String p, String s) {}
-            @Override public void phaseError(Long t, String p, String msg) {}
-            @Override public void decisionRequired(Long t, String ty, String s, java.util.List<String> o) {}
-            @Override public void taskComplete(Long t, String s, String sum) {}
-            @Override public void taskFailed(Long t, String e, int r) {}
-        };
         MultiInterfaceOrchestrator flakyOrch = new MultiInterfaceOrchestrator(
-                flakyAgent, null, new PromptBuilder(), stubEvents, syncExecutor);
+                flakyAgent, null, new PromptBuilder(), syncExecutor);
 
         List<InterfaceSegment> allSegments = splitter.split(MULTI_DOC);
         List<String> selectedIds = allSegments.stream()

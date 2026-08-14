@@ -19,8 +19,14 @@ CREATE TABLE IF NOT EXISTS ai_task (
     parent_task_id  BIGINT       DEFAULT NULL COMMENT '父任务ID，子任务指向主任务',
     interface_id    VARCHAR(100) DEFAULT NULL COMMENT '接口标识，如 LOAN_APPLY',
     interface_name  VARCHAR(200) DEFAULT NULL COMMENT '接口名称，如 放款申请',
+    decision_type    VARCHAR(32)  DEFAULT NULL COMMENT '决策类型: PUBLISH_CONFIRM/RECOVERY_EXHAUSTED',
+    decision_summary TEXT         COMMENT '决策摘要（展示给用户）',
+    decision_options JSON         COMMENT '决策选项列表(JSON数组)',
+    decision_result  VARCHAR(32)  DEFAULT NULL COMMENT '用户已提交的决策',
+    decision_time    DATETIME     DEFAULT NULL COMMENT '决策提交时间',
     create_time     DATETIME     DEFAULT CURRENT_TIMESTAMP,
-    update_time     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    update_time     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_ai_task_parent (parent_task_id)
 );
 
 -- 2. LLM 调用审计日志（金融合规核心）
@@ -67,7 +73,7 @@ CREATE TABLE IF NOT EXISTS ai_agent_trace (
     INDEX idx_trace_task (task_id)
 );
 
--- 4. 反馈记录（数据飞轮载体）
+-- 4. 反馈记录（人工反馈载体 — 数据飞轮已切断，仅用于聚合日志）
 CREATE TABLE IF NOT EXISTS ai_feedback (
     id              BIGINT PRIMARY KEY AUTO_INCREMENT,
     task_id         BIGINT,
@@ -80,19 +86,4 @@ CREATE TABLE IF NOT EXISTS ai_feedback (
     create_time     DATETIME     DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_fb_task (task_id),
     INDEX idx_fb_provider (provider_code)
-);
-
--- 5. 配置审核记录
-CREATE TABLE IF NOT EXISTS ai_config_review (
-    id              BIGINT PRIMARY KEY AUTO_INCREMENT,
-    config_type     VARCHAR(32)  NOT NULL COMMENT 'FIELD_MAPPING/FLOW_DSL/TEMPLATE',
-    config_id       BIGINT       COMMENT '关联配置表ID(fl_*)',
-    old_content     MEDIUMTEXT,
-    new_content     MEDIUMTEXT   COMMENT 'AI生成的新配置',
-    diff_json       JSON,
-    status          VARCHAR(16)  DEFAULT 'PENDING' COMMENT 'PENDING/APPROVED/REJECTED',
-    reviewer        VARCHAR(64),
-    review_comment  TEXT,
-    create_time     DATETIME     DEFAULT CURRENT_TIMESTAMP,
-    review_time     DATETIME
 );

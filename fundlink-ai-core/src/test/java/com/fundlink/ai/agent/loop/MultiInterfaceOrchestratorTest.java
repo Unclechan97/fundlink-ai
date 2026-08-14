@@ -23,7 +23,6 @@ class MultiInterfaceOrchestratorTest {
 
     private MultiInterfaceOrchestrator orch;
     private StubRequirementAgent stubAgent;
-    private StubEventPublisher stubEvents;
 
     /** 同步 executor — 并行变串行，方便断言 */
     private final Executor syncExecutor = Runnable::run;
@@ -31,10 +30,8 @@ class MultiInterfaceOrchestratorTest {
     @BeforeEach
     void setUp() {
         stubAgent = new StubRequirementAgent();
-        stubEvents = new StubEventPublisher();
         orch = new MultiInterfaceOrchestrator(
-                stubAgent, null, new PromptBuilder(),
-                stubEvents, syncExecutor);
+                stubAgent, null, new PromptBuilder(), syncExecutor);
     }
 
     @Nested
@@ -129,25 +126,6 @@ class MultiInterfaceOrchestratorTest {
         }
     }
 
-    @Nested
-    @DisplayName("SSE 事件")
-    class SseEvents {
-
-        @Test
-        @DisplayName("接口事件按序发出")
-        void shouldEmitEvents() {
-            List<InterfaceSegment> segments = List.of(
-                    createSegment("id1", "接口A", "POST", "/api/a", "a", 0)
-            );
-
-            orch.processInterfaces(segments, "TEST_BANK", "LOAN");
-
-            // 验证 interface 事件
-            assertThat(stubEvents.interfaceStartCalled).isTrue();
-            assertThat(stubEvents.interfaceCompleteStatus).isEqualTo("SUCCESS");
-        }
-    }
-
     // ── helpers ──
 
     private InterfaceSegment createSegment(String id, String name, String method,
@@ -180,40 +158,5 @@ class MultiInterfaceOrchestratorTest {
             r.setProviderConfig(new ProviderConfig());
             return r;
         }
-    }
-
-    static class StubEventPublisher implements LoopEventPublisher {
-        boolean splitStartCalled;
-        int splitCompleteTotal;
-        boolean interfaceStartCalled;
-        String interfaceCompleteStatus;
-        int allCompleteSuccessCount;
-
-        @Override public void splitStart(Long taskId) { splitStartCalled = true; }
-        @Override public void splitComplete(Long taskId, int c, List<java.util.Map<String, Object>> i) {
-            splitCompleteTotal = c;
-        }
-        @Override public void interfaceStart(Long taskId, String iid, String n, int i, int t) {
-            interfaceStartCalled = true;
-        }
-        @Override public void interfaceComplete(Long taskId, String iid, String n, String s, String sum) {
-            interfaceCompleteStatus = s;
-        }
-        @Override public void allComplete(Long taskId, int tc, int sc, int fc) {
-            allCompleteSuccessCount = sc;
-        }
-
-        // unused
-        @Override public void phaseStart(Long t, String p, int r, int m) {}
-        @Override public void phaseProgress(Long t, String p, String msg) {}
-        @Override public void phaseComplete(Long t, String p, String s) {}
-        @Override public void phaseError(Long t, String p, String msg) {}
-        @Override public void decisionRequired(Long t, String ty, String s, List<String> o) {}
-        @Override public void taskComplete(Long t, String s, String sum) {}
-        @Override public void taskFailed(Long t, String e, int r) {}
-        @Override public void interfacePhaseStart(Long t, String iid, String p, int r, int m) {}
-        @Override public void interfacePhaseProgress(Long t, String iid, String p, String msg) {}
-        @Override public void interfacePhaseComplete(Long t, String iid, String p, String s) {}
-        @Override public void interfacePhaseError(Long t, String iid, String p, String msg) {}
     }
 }

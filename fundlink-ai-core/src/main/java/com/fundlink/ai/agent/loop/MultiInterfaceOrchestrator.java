@@ -9,10 +9,8 @@ import com.fundlink.ai.agent.split.InterfaceSegment;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 多接口并行处理器（Phase 3）。
@@ -21,9 +19,11 @@ import java.util.concurrent.TimeUnit;
  *
  * 流程：
  * 1. 接收拆分好的 InterfaceSegment 列表
- * 2. 并行调用 RequirementAgent.analyze()（CompletableFuture）
+ * 2. 并行调用 RequirementAgent.analyze()（CompletableFuture + 有界线程池）
  * 3. 每个接口独立 Prompt、独立 LLM 调用、错误隔离
  * 4. 聚合为 MultiInterfaceResult
+ * <p>
+ * SSE 已移除（2026-08）：事件发布改日志。
  */
 @Slf4j
 public class MultiInterfaceOrchestrator {
@@ -31,28 +31,50 @@ public class MultiInterfaceOrchestrator {
     private final RequirementAgent requirementAgent;
     private final ConfigWriter configWriter;
     private final PromptBuilder promptBuilder;
-    private final LoopEventPublisher eventPublisher;
     private final Executor executor;
+    private final boolean ownsExecutor;
 
     public MultiInterfaceOrchestrator(RequirementAgent requirementAgent,
                                        ConfigWriter configWriter,
-                                       PromptBuilder promptBuilder,
-                                       LoopEventPublisher eventPublisher) {
-        this(requirementAgent, configWriter, promptBuilder, eventPublisher,
-                Executors.newCachedThreadPool());
+                                       PromptBuilder promptBuilder) {
+        this(requirementAgent, configWriter, promptBuilder, defaultExecutor(), true);
     }
 
-    /** 测试用构造函数 — 注入自定义 Executor */
+    /** 测试用构造函数 — 注入自定义 Executor（生命周期由调用方负责） */
     public MultiInterfaceOrchestrator(RequirementAgent requirementAgent,
                                 ConfigWriter configWriter,
                                 PromptBuilder promptBuilder,
-                                LoopEventPublisher eventPublisher,
                                 Executor executor) {
+        this(requirementAgent, configWriter, promptBuilder, executor, false);
+    }
+
+    private MultiInterfaceOrchestrator(RequirementAgent requirementAgent,
+                                       ConfigWriter configWriter,
+                                       PromptBuilder promptBuilder,
+                                       Executor executor,
+                                       boolean ownsExecutor) {
         this.requirementAgent = requirementAgent;
         this.configWriter = configWriter;
         this.promptBuilder = promptBuilder;
-        this.eventPublisher = eventPublisher;
         this.executor = executor;
+        this.ownsExecutor = ownsExecutor;
+    }
+
+    /** 有界池替代 newCachedThreadPool — 并发可控，daemon 线程不阻塞 JVM 退出 */
+    private static Executor defaultExecutor() {
+        AtomicInteger seq = new AtomicInteger(0);
+        return Executors.newFixedThreadPool(4, r -> {
+            Thread t = new Thread(r, "multi-interface-" + seq.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    /** 释放自有线程池（测试/独立运行时使用） */
+    public void shutdown() {
+        if (ownsExecutor && executor instanceof ExecutorService es) {
+            es.shutdownNow();
+        }
     }
 
     /**
@@ -76,15 +98,14 @@ public class MultiInterfaceOrchestrator {
         // 退化：单接口 → 不启动并行（保持与现有逻辑一致）
         if (segments.size() == 1) {
             InterfaceSegment seg = segments.get(0);
-            eventPublisher.interfaceStart(null, seg.getInterfaceId(),
-                    seg.getInterfaceName(), seg.getIndex(), 1);
+            log.info("[MULTI] interface:start  interfaceId={}  name={}  index={}/{}",
+                    seg.getInterfaceId(), seg.getInterfaceName(), seg.getIndex(), 1);
             RequirementResult result = processOneInterface(seg, providerCode, flowType,
                     segments, 1, 1);
             MultiInterfaceResult.InterfaceResultItem item =
                     buildItem(seg, result);
-            eventPublisher.interfaceComplete(null, seg.getInterfaceId(),
-                    seg.getInterfaceName(), item.getStatus(),
-                    item.getStatus().equals("SUCCESS") ? "解析完成" : item.getErrorMessage());
+            log.info("[MULTI] interface:complete  interfaceId={}  name={}  status={}",
+                    seg.getInterfaceId(), seg.getInterfaceName(), item.getStatus());
             aggregate.getInterfaces().add(item);
             aggregate.setSuccessCount(result.getParseError() == null ? 1 : 0);
             aggregate.setFailedCount(result.getParseError() != null ? 1 : 0);
@@ -98,30 +119,23 @@ public class MultiInterfaceOrchestrator {
                 new ArrayList<>();
         for (InterfaceSegment seg : segments) {
             futures.add(CompletableFuture.supplyAsync(() -> {
-                // 发 interface:start 事件
-                eventPublisher.interfaceStart(null, seg.getInterfaceId(),
-                        seg.getInterfaceName(), seg.getIndex(), total);
+                log.info("[MULTI] interface:start  interfaceId={}  name={}  index={}/{}",
+                        seg.getInterfaceId(), seg.getInterfaceName(), seg.getIndex(), total);
 
                 RequirementResult result = processOneInterface(
                         seg, providerCode, flowType, segments, seg.getIndex() + 1, total);
 
                 MultiInterfaceResult.InterfaceResultItem item = buildItem(seg, result);
 
-                // 发 interface:complete 事件
-                eventPublisher.interfaceComplete(null, seg.getInterfaceId(),
-                        seg.getInterfaceName(), item.getStatus(),
-                        item.getStatus().equals("SUCCESS") ? "解析完成" : item.getErrorMessage());
+                log.info("[MULTI] interface:complete  interfaceId={}  name={}  status={}",
+                        seg.getInterfaceId(), seg.getInterfaceName(), item.getStatus());
 
                 return item;
             }, executor).exceptionally(ex -> {
                 log.error("[MULTI] Interface {} failed: {}", seg.getInterfaceId(), ex.getMessage());
-                MultiInterfaceResult.InterfaceResultItem item =
-                        MultiInterfaceResult.InterfaceResultItem.failed(
-                                seg.getInterfaceId(), seg.getInterfaceName(),
-                                seg.getEndpoint(), ex.getMessage());
-                eventPublisher.interfaceComplete(null, seg.getInterfaceId(),
-                        seg.getInterfaceName(), "FAILED", ex.getMessage());
-                return item;
+                return MultiInterfaceResult.InterfaceResultItem.failed(
+                        seg.getInterfaceId(), seg.getInterfaceName(),
+                        seg.getEndpoint(), ex.getMessage());
             }).orTimeout(10, TimeUnit.MINUTES).exceptionally(ex -> {
                 log.warn("[MULTI] Interface {} timeout", seg.getInterfaceId());
                 return MultiInterfaceResult.InterfaceResultItem.timeout(

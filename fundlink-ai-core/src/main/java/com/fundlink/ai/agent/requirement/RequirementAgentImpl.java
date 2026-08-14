@@ -8,6 +8,7 @@ import com.fundlink.ai.agent.PromptEnhancer;
 import com.fundlink.ai.gateway.LlmGateway;
 import com.fundlink.ai.gateway.LlmRequest;
 import com.fundlink.ai.gateway.LlmResponse;
+import com.fundlink.ai.gateway.RagGateway;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -44,9 +45,15 @@ public class RequirementAgentImpl implements RequirementAgent {
         log.info("[REQ-AGENT] Start  traceId={}  provider={}  flowType={}  autoDetected={}  docLen={}",
                 traceId, providerCode, detected, autoDetected, documentText.length());
 
-        // 1. RAG 检索历史案例
-        List<String> ragExamples = enhancer.search(ft + " 字段映射 流程配置 " + providerCode);
-        log.info("[REQ-AGENT] RAG examples={}  traceId={}", ragExamples.size(), traceId);
+        // 1. RAG 检索历史案例 — 不可用时解析照常进行，但结果上携带用户可见提示
+        RagGateway.SearchResult rag = enhancer.search(ft + " 字段映射 流程配置 " + providerCode);
+        List<String> ragExamples = rag.getResults();
+        String notice = null;
+        if (!rag.isAvailable()) {
+            log.warn("[REQ-AGENT] RAG 不可用  traceId={}", traceId);
+            notice = "知识库暂不可用，本次解析未参考历史案例";
+        }
+        log.info("[REQ-AGENT] RAG examples={}  available={}  traceId={}", ragExamples.size(), rag.isAvailable(), traceId);
 
         // 2. 组装 Prompt (模板 + 字段目录 + RAG)
         String prompt = promptBuilder.build(documentText, providerCode, ft, ragExamples);
@@ -64,6 +71,9 @@ public class RequirementAgentImpl implements RequirementAgent {
 
         // 4. 安全解析
         RequirementResult result = parseSafely(response.getContent());
+        if (notice != null) {
+            result.setNotice(notice);
+        }
 
         // 5. 字段完整性检查 — 接口文档中的所有字段都必须有映射
         if (result.getParseError() == null) {

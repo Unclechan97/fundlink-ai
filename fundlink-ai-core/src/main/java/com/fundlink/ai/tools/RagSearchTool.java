@@ -46,7 +46,12 @@ public class RagSearchTool implements Tool {
         log.info("[RagSearchTool] query={}  topK={}", query, topK);
 
         try {
-            List<String> results = ragGateway.search(query, topK);
+            RagGateway.SearchResult r = ragGateway.search(query, topK);
+            if (!r.isAvailable()) {
+                log.warn("[RagSearchTool] 知识库暂不可用  query={}", query);
+                return "{\"found\": false, \"error\": \"知识库暂不可用，无法检索历史案例\"}";
+            }
+            List<String> results = r.getResults();
             if (results.isEmpty()) {
                 return "{\"found\": false, \"message\": \"知识库未找到相关结果\"}";
             }

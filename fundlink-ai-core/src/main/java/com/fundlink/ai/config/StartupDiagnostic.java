@@ -29,13 +29,10 @@ public class StartupDiagnostic {
     @Value("${fundlink.llm.providers.deepseek.api-key:}")
     private String deepseekKey;
 
-    @Value("${fundlink.llm.providers.claude.api-key:}")
-    private String claudeKey;
-
     @Value("${fundlink.llm.router.default-provider:deepseek}")
     private String defaultProvider;
 
-    @Value("${fundlink.llm.router.fallback-chain:deepseek,claude,qwen}")
+    @Value("${fundlink.llm.router.fallback-chain:deepseek,qwen,siliconflow}")
     private String fallbackChain;
 
     @Value("${spring.datasource.url:}")
@@ -53,7 +50,6 @@ public class StartupDiagnostic {
         // LLM keys
         log.info("║ Qwen key:    {}", keyStatus(qwenKey));
         log.info("║ DeepSeek key:{}", keyStatus(deepseekKey));
-        log.info("║ Claude key:  {}", keyStatus(claudeKey));
         log.info("║ Router:      {}  fallback: {}", defaultProvider, fallbackChain);
         // Upstream services
         log.info("║ FundLink:    {} → {}", fundlinkUrl, checkHttp(fundlinkUrl + "/api/admin/providers?page=1&size=1"));

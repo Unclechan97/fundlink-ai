@@ -13,8 +13,8 @@ import java.util.Map;
 /**
  * 人工反馈 API — 排查结果评分 + 修正。
  * <p>
- * 反馈数据写入 ai_feedback，由 PatternAnalyzer / KnowledgeAutoWriter
- * 定时分析后写回 RAG 知识库。
+ * 反馈数据写入 ai_feedback，由 PatternAnalyzer 定时聚合为修正模式报告（仅日志）。
+ * 数据飞轮已切断（2026-08）：不再自动写回 RAG 知识库。
  */
 @Slf4j
 @RestController

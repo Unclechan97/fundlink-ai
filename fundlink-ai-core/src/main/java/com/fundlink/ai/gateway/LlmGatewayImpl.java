@@ -27,7 +27,7 @@ public class LlmGatewayImpl implements LlmGateway {
             Map<String, LlmProvider> providers,
             AuditPersistenceService auditService,
             SmartRouter smartRouter,
-            @Value("${fundlink.llm.router.fallback-chain:deepseek,claude,qwen}") List<String> fallbackChain,
+            @Value("${fundlink.llm.router.fallback-chain:deepseek,qwen,siliconflow}") List<String> fallbackChain,
             @Value("${fundlink.llm.router.retry-max:2}") int retryMax) {
         this.providers = providers;
         this.auditService = auditService;

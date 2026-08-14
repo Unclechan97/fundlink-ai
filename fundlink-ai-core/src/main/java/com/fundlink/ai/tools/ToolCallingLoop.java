@@ -19,9 +19,6 @@ public class ToolCallingLoop {
     private final int maxRounds;
     private final ObjectMapper json = new ObjectMapper();
 
-    /** 可选监听器 — 排查链路写入 ai_agent_trace */
-    private ToolLoopListener listener;
-
     public ToolCallingLoop(LlmGateway llmGateway, ToolRegistry toolRegistry) {
         this(llmGateway, toolRegistry, 3);
     }
@@ -32,22 +29,19 @@ public class ToolCallingLoop {
         this.maxRounds = maxRounds;
     }
 
-    /** 设置可选监听器（排查链路用于写入 ai_agent_trace） */
-    public void setListener(ToolLoopListener listener) {
-        this.listener = listener;
-    }
-
     public String run(String systemPrompt, String userPrompt, String traceId) {
         return run(systemPrompt, userPrompt, traceId, null);
     }
 
     /**
-     * 执行 Tool Calling 循环，可选 listener。
-     * @param listener 可选监听器，传 null 则行为与旧版一致
+     * 执行 Tool Calling 循环。
+     * <p>
+     * listener 为局部参数（CRITICAL-4）：共享实例并发调用时 trace 不会串台。
+     *
+     * @param listener 可选监听器，传 null 则只记日志
      */
     public String run(String systemPrompt, String userPrompt, String traceId,
                       ToolLoopListener listener) {
-        this.listener = listener;
         List<Map<String, Object>> messages = new ArrayList<>();
         messages.add(Map.of("role", "system", "content", systemPrompt));
         messages.add(Map.of("role", "user", "content", userPrompt));
@@ -61,8 +55,8 @@ public class ToolCallingLoop {
             log.info("[ToolLoop] Round {}  traceId={}", round, traceId);
             long roundStart = System.currentTimeMillis();
 
-            if (this.listener != null) {
-                this.listener.onRoundStart(round);
+            if (listener != null) {
+                listener.onRoundStart(round);
             }
 
             LlmRequest request = LlmRequest.ofTools(messages, toolRegistry.toOpenAiTools(), traceId);
@@ -76,8 +70,8 @@ public class ToolCallingLoop {
 
             if (!response.isToolCall()) {
                 log.info("[ToolLoop] Final answer  round={}", round);
-                if (this.listener != null) {
-                    this.listener.onComplete(round, totalToolCalls,
+                if (listener != null) {
+                    listener.onComplete(round, totalToolCalls,
                             System.currentTimeMillis() - startTime);
                 }
                 return response.getContent();
@@ -109,18 +103,18 @@ public class ToolCallingLoop {
                 ));
 
                 // 回调监听器
-                if (this.listener != null) {
+                if (listener != null) {
                     String argsStr = "";
                     try {
                         argsStr = json.writeValueAsString(tc.getArguments());
                     } catch (Exception ignored) {}
                     String resultStr = result.getContent() != null ? result.getContent() : "";
-                    this.listener.onToolCall(round, tc.getName(), argsStr, resultStr);
+                    listener.onToolCall(round, tc.getName(), argsStr, resultStr);
                 }
             }
 
-            if (this.listener != null) {
-                this.listener.onRoundEnd(round, toolCalls.size(),
+            if (listener != null) {
+                listener.onRoundEnd(round, toolCalls.size(),
                         System.currentTimeMillis() - roundStart);
             }
         }
@@ -130,8 +124,8 @@ public class ToolCallingLoop {
                 "请基于以上所有工具查询结果，给出最终的诊断分析（错误原因、影响范围、修复建议）。"));
         try {
             String finalAnswer = llmGateway.chat(LlmRequest.ofTools(messages, null, traceId)).getContent();
-            if (this.listener != null) {
-                this.listener.onComplete(round, totalToolCalls,
+            if (listener != null) {
+                listener.onComplete(round, totalToolCalls,
                         System.currentTimeMillis() - startTime);
             }
             return finalAnswer;

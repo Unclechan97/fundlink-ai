@@ -27,6 +27,9 @@ public class RequirementResult {
     /** 本文档拆出的接口总数 */
     private int totalInterfaces;
 
+    /** 用户可见提示（如"知识库暂不可用，解析未参考历史案例"），正常为 null */
+    private String notice;
+
     public ProviderConfig getProviderConfig() { return providerConfig; }
     public void setProviderConfig(ProviderConfig p) { this.providerConfig = p; }
     public InterfaceSchema getInterfaceSchema() { return interfaceSchema; }
@@ -55,4 +58,7 @@ public class RequirementResult {
 
     public int getTotalInterfaces() { return totalInterfaces; }
     public void setTotalInterfaces(int n) { this.totalInterfaces = n; }
+
+    public String getNotice() { return notice; }
+    public void setNotice(String notice) { this.notice = notice; }
 }

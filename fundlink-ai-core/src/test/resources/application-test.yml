@@ -9,11 +9,6 @@ spring:
     init:
       mode: always
       schema-locations: classpath:db/schema-ai.sql
-  ai:
-    openai:
-      api-key: test-key-not-used
-    retry:
-      max-attempts: 1
 
 mybatis-plus:
   global-config:

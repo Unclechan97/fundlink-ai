@@ -8,6 +8,9 @@ import java.util.List;
 
 /**
  * Few-shot 动态注入 — Agent 调用前从 RAG 检索相关案例
+ * <p>
+ * RAG 不可用时返回未增强的原始 Prompt（解析仍可进行），
+ * 并通过 {@link #search(String)} 的 {@code available} 标志让调用方向用户明示。
  */
 @Slf4j
 @Service
@@ -22,9 +25,9 @@ public class PromptEnhancer {
     /**
      * RAG 语义检索（供 Agent 直接调用）
      * @param query 搜索查询
-     * @return 检索到的文本片段列表
+     * @return 检索结果（含 available 标志）
      */
-    public List<String> search(String query) {
+    public RagGateway.SearchResult search(String query) {
         return ragGateway.search(query, 3);
     }
 
@@ -32,12 +35,17 @@ public class PromptEnhancer {
      * 用 RAG 检索结果增强 Prompt
      * @param basePrompt 原始 Prompt
      * @param query 搜索查询(用任务关键词构建)
-     * @return 增强后的 Prompt（包含 Few-shot 示例）
+     * @return 增强后的 Prompt（包含 Few-shot 示例；RAG 不可用时返回原 Prompt）
      */
     public String enhance(String basePrompt, String query) {
         log.info("[ENHANCER] Searching RAG for few-shot  query={}", query);
-        List<String> examples = ragGateway.search(query, 3);
-        log.info("[ENHANCER] RAG returned {} examples", examples.size());
+        RagGateway.SearchResult r = ragGateway.search(query, 3);
+        List<String> examples = r.getResults();
+        log.info("[ENHANCER] RAG returned {} examples  available={}", examples.size(), r.isAvailable());
+        if (!r.isAvailable()) {
+            log.warn("[ENHANCER] 知识库暂不可用 — 使用未增强的基础 Prompt 继续解析");
+            return basePrompt;
+        }
         if (examples.isEmpty()) {
             return basePrompt;
         }

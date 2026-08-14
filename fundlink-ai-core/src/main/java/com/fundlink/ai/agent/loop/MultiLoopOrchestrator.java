@@ -1,33 +1,47 @@
 package com.fundlink.ai.agent.loop;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fundlink.ai.agent.FlowTypeDetector;
 import com.fundlink.ai.agent.PromptBuilder;
 import com.fundlink.ai.agent.split.DocumentSplitter;
-import com.fundlink.ai.agent.split.EndpointShortName;
 import com.fundlink.ai.agent.split.InterfaceDeduplicator;
 import com.fundlink.ai.agent.split.InterfaceSegment;
 import com.fundlink.ai.entity.AiTask;
 import com.fundlink.ai.mapper.AiTaskMapper;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 多接口自动闭环编排器。
  *
  * 将一个包含多个接口的文档拆分为 N 个子任务，每个子任务独立走完整闭环。
- * 复用 {@link AgentLoopOrchestrator#start(Long)} 驱动子任务。
+ * 复用 {@link AgentLoopOrchestrator#start(Long)} 驱动子任务（@Async，调用即返回）。
+ * <p>
+ * 父任务状态聚合：后台监控线程轮询子任务，全部到达终态后父任务标记
+ * PUBLISHED（全部成功）/ FAILED（任一失败），汇总写入 output_data。
+ * SSE 已移除（2026-08），聚合逻辑与前端轮询无耦合。
  */
 @Slf4j
 @Service
 public class MultiLoopOrchestrator {
 
+    private static final Set<String> SUB_TERMINAL = Set.of("PUBLISHED", "FAILED", "ABORTED");
+    /** 聚合监控轮询间隔（ms） */
+    private static final long MONITOR_POLL_MS = 3000;
+    /** 聚合监控最长时长 — 超过后放弃（留给重启补偿兜底） */
+    private static final long MONITOR_MAX_MS = 12 * 3600_000L;
+
     private final AgentLoopOrchestrator loopOrchestrator;
     private final AiTaskMapper taskMapper;
     private final PromptBuilder promptBuilder;
+    private final ObjectMapper json = new ObjectMapper();
+    private final ExecutorService monitorExecutor;
 
     public MultiLoopOrchestrator(AgentLoopOrchestrator loopOrchestrator,
                                   AiTaskMapper taskMapper,
@@ -35,6 +49,17 @@ public class MultiLoopOrchestrator {
         this.loopOrchestrator = loopOrchestrator;
         this.taskMapper = taskMapper;
         this.promptBuilder = promptBuilder;
+        AtomicInteger seq = new AtomicInteger(0);
+        this.monitorExecutor = Executors.newFixedThreadPool(2, r -> {
+            Thread t = new Thread(r, "multi-loop-monitor-" + seq.incrementAndGet());
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        monitorExecutor.shutdownNow();
     }
 
     /**
@@ -88,6 +113,7 @@ public class MultiLoopOrchestrator {
 
         // 4. 为每个选中接口创建子任务并启动
         List<SubTaskInfo> subTasks = new ArrayList<>();
+        List<Long> subTaskIds = new ArrayList<>();
         for (InterfaceSegment segment : selected) {
             AiTask sub = new AiTask();
             sub.setParentTaskId(parent.getId());
@@ -111,22 +137,90 @@ public class MultiLoopOrchestrator {
 
             subTasks.add(new SubTaskInfo(sub.getId(), segment.getInterfaceId(),
                     segment.getInterfaceName(), segment.getEndpoint()));
+            subTaskIds.add(sub.getId());
 
-            // 异步启动子任务闭环
-            CompletableFuture.runAsync(() -> {
-                try {
-                    loopOrchestrator.start(sub.getId());
-                } catch (Exception e) {
-                    log.error("[MULTI] Sub-task {} start failed: {}", sub.getId(), e.getMessage(), e);
-                }
-            });
+            // 直接调用（start 本身 @Async）— 不再经 commonPool 的 runAsync
+            try {
+                loopOrchestrator.start(sub.getId());
+            } catch (Exception e) {
+                log.error("[MULTI] Sub-task {} start failed: {}", sub.getId(), e.getMessage(), e);
+            }
 
             log.info("[MULTI] Sub-task created  id={}  interfaceId={}  name={}",
                     sub.getId(), segment.getInterfaceId(), segment.getInterfaceName());
         }
 
+        // 5. 后台聚合：子任务全部终态后父任务标记 PUBLISHED/FAILED
+        monitorExecutor.submit(() -> monitorParentUntilTerminal(parent.getId(), subTaskIds));
+
         log.info("[MULTI] Multi-loop ready  parentId={}  subTaskCount={}", parent.getId(), subTasks.size());
         return new MultiLoopResult(parent.getId(), parent.getTaskNo(), subTasks);
+    }
+
+    /** 轮询子任务直至全部终态（或超时放弃），然后聚合父任务状态 */
+    private void monitorParentUntilTerminal(Long parentId, List<Long> subTaskIds) {
+        long deadline = System.currentTimeMillis() + MONITOR_MAX_MS;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(MONITOR_POLL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (allSubTasksTerminal(subTaskIds)) {
+                aggregateParentStatus(parentId);
+                return;
+            }
+        }
+        log.warn("[MULTI] Parent {} monitor gave up after {}h — 等待重启补偿兜底",
+                parentId, MONITOR_MAX_MS / 3600_000L);
+    }
+
+    private boolean allSubTasksTerminal(List<Long> subTaskIds) {
+        for (Long id : subTaskIds) {
+            AiTask t = taskMapper.selectById(id);
+            if (t == null || !SUB_TERMINAL.contains(t.getStatus())) return false;
+        }
+        return true;
+    }
+
+    /** 汇总子任务状态写入父任务：全部 PUBLISHED → PUBLISHED，否则 FAILED。幂等。 */
+    public void aggregateParentStatus(Long parentId) {
+        try {
+            AiTask parent = taskMapper.selectById(parentId);
+            if (parent == null) return;
+            if ("PUBLISHED".equals(parent.getStatus()) || "FAILED".equals(parent.getStatus())) {
+                return; // 已聚合
+            }
+
+            List<AiTask> children = taskMapper.selectList(
+                    com.baomidou.mybatisplus.core.toolkit.Wrappers.<AiTask>lambdaQuery()
+                            .eq(AiTask::getParentTaskId, parentId));
+            if (children.isEmpty() || children.stream().anyMatch(c -> !SUB_TERMINAL.contains(c.getStatus()))) {
+                return; // 还有未完成的子任务
+            }
+
+            int published = (int) children.stream().filter(c -> "PUBLISHED".equals(c.getStatus())).count();
+            int failed = (int) children.stream().filter(c -> "FAILED".equals(c.getStatus())).count();
+            int aborted = (int) children.stream().filter(c -> "ABORTED".equals(c.getStatus())).count();
+            String parentStatus = (published == children.size()) ? "PUBLISHED" : "FAILED";
+
+            parent.setStatus(parentStatus);
+            parent.setUpdateTime(LocalDateTime.now());
+            try {
+                parent.setOutputData(json.writeValueAsString(Map.of(
+                        "total", children.size(),
+                        "published", published,
+                        "failed", failed,
+                        "aborted", aborted,
+                        "aggregatedAt", LocalDateTime.now().toString())));
+            } catch (Exception ignored) {}
+            taskMapper.updateById(parent);
+            log.info("[MULTI] Parent {} aggregated  status={}  total={}  published={}  failed={}  aborted={}",
+                    parentId, parentStatus, children.size(), published, failed, aborted);
+        } catch (Exception e) {
+            log.error("[MULTI] Failed to aggregate parent {}: {}", parentId, e.getMessage());
+        }
     }
 
     // ── 结果类型 ──
