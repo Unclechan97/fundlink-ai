@@ -1,8 +1,8 @@
 package com.fundlink.ai.config;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -14,10 +14,15 @@ import java.util.Map;
  * <p>
  * schema-ai.sql 使用 CREATE TABLE IF NOT EXISTS，对已存在的库不生效 —
  * 这里按 information_schema 逐个补列/补索引，幂等可重入，新旧库通吃。
+ * <p>
+ * 实现为 {@link ApplicationRunner} 而非 ApplicationReadyEvent 监听：
+ * Runner 保证在 ApplicationReadyEvent 发布前执行完毕 —
+ * 否则 LoopStartupRecovery 等 ready 监听器可能先于迁移访问 ai_task，
+ * 在旧库上直接报 Unknown column（两个监听器的执行顺序不保证）。
  */
 @Slf4j
 @Component
-public class SchemaMigration {
+public class SchemaMigration implements ApplicationRunner {
 
     private static final Map<String, String> AI_TASK_COLUMNS = new LinkedHashMap<>();
 
@@ -38,7 +43,11 @@ public class SchemaMigration {
         this.jdbc = jdbc;
     }
 
-    @EventListener(ApplicationReadyEvent.class)
+    @Override
+    public void run(ApplicationArguments args) {
+        migrate();
+    }
+
     public void migrate() {
         try {
             for (Map.Entry<String, String> col : AI_TASK_COLUMNS.entrySet()) {
