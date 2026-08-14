@@ -6,6 +6,7 @@ import com.fundlink.ai.gateway.LlmResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -16,6 +17,11 @@ import java.util.Map;
  * 2. LLM 意图识别（兜底）— 规则覆盖不到时调用
  *
  * 优先级：TROUBLESHOOTING > INTERFACE_DEV > KNOWLEDGE_QA
+ * <p>
+ * 排查 vs 问答的区分原则：故障现场信号强于疑问句式 —
+ * "为什么放款失败了？"是排查（事故提问词×故障词组合），
+ * 只有定义/操作句式（什么是/如何/怎么）且无故障词时才判问答；
+ * 裸"？"不再直接判问答，交给 LLM 兜底。
  */
 @Slf4j
 public class IntentRouter {
@@ -27,6 +33,20 @@ public class IntentRouter {
     private static final double RULE_CONFIDENCE = 0.95;
     /** LLM 低置信度阈值 — 低于此值触发前端确认 */
     private static final double LOW_CONFIDENCE_THRESHOLD = 0.7;
+
+    /** 堆栈/日志特征（小写匹配）— 出现即排查 */
+    private static final List<String> TS_LOG_MARKERS = List.of(
+            "exception", "at com.", "caused by:", "stack trace:", "error",
+            "nullpointerexception", "outofmemoryerror");
+
+    /** 事故提问词 — 与故障词组合出现时判排查（刻意排除"怎么/如何"这类操作问答词） */
+    private static final List<String> TS_QUESTION_WORDS = List.of(
+            "为什么", "为啥", "为何", "什么原因", "什么情况", "什么问题", "怎么回事",
+            "哪里", "哪", "啥");
+
+    /** 故障词 — 与事故提问词组合出现时判排查 */
+    private static final List<String> TS_FAILURE_WORDS = List.of(
+            "失败", "报错", "错误", "异常", "超时", "拒绝", "连不上", "挂了", "崩", "慢", "卡", "错了");
 
     public IntentRouter(LlmGateway llmGateway) {
         this.llmGateway = llmGateway;
@@ -71,11 +91,28 @@ public class IntentRouter {
      * 返回 null 表示规则未命中，需要走 LLM。
      */
     IntentType quickRuleCheck(String input) {
-        // === TROUBLESHOOTING：堆栈跟踪特征（最高优先级）===
-        if (input.contains("Exception")
-                || input.contains("at com.")
-                || input.contains("Caused by:")
-                || input.contains("Stack trace:")) {
+        String lower = input.toLowerCase();
+
+        // === TROUBLESHOOTING：堆栈/日志特征（最高优先级）===
+        if (TS_LOG_MARKERS.stream().anyMatch(lower::contains)) {
+            return IntentType.TROUBLESHOOTING;
+        }
+
+        // === 定义句式优先（"什么是失败重试策略"是问答，不是排查）===
+        if (input.startsWith("什么是") || input.startsWith("是什么")) {
+            return IntentType.KNOWLEDGE_QA;
+        }
+
+        // === TROUBLESHOOTING：单独故障现场词（"模板渲染报错"）===
+        if (input.contains("报错")) {
+            return IntentType.TROUBLESHOOTING;
+        }
+
+        // === TROUBLESHOOTING：事故提问 × 故障词组合 ===
+        // "为什么放款失败了？" / "查询接口为什么这么慢" / "这是什么原因导致的超时"
+        boolean hasIncidentQuestion = TS_QUESTION_WORDS.stream().anyMatch(input::contains);
+        boolean hasFailureWord = TS_FAILURE_WORDS.stream().anyMatch(input::contains);
+        if (hasIncidentQuestion && hasFailureWord) {
             return IntentType.TROUBLESHOOTING;
         }
 
@@ -91,14 +128,19 @@ public class IntentRouter {
             return IntentType.INTERFACE_DEV;
         }
 
-        // === KNOWLEDGE_QA：疑问句特征 ===
-        if (input.contains("?") || input.contains("？")
-                || input.startsWith("什么是") || input.startsWith("如何")
+        // === KNOWLEDGE_QA：定义/操作/原因类疑问词（无故障词）===
+        if (input.startsWith("如何") || input.startsWith("为什么")
                 || input.contains("怎么")) {
             return IntentType.KNOWLEDGE_QA;
         }
+        // 疑问句 + 定义词（"T+1对账是什么？" / "流程中什么是T+1对账？"）
+        if ((input.contains("?") || input.contains("？"))
+                && (input.contains("是什么") || input.contains("什么是"))) {
+            return IntentType.KNOWLEDGE_QA;
+        }
 
-        return null; // 无强特征
+        // 裸"？"等弱特征不再直接判问答 — 交给 LLM 兜底
+        return null;
     }
 
     // ── LLM 识别 ──
@@ -136,8 +178,16 @@ public class IntentRouter {
 
                 判断规则：
                 - INTERFACE_DEV: 包含 API 端点/接口字段/入参出参/接口规范
-                - KNOWLEDGE_QA: 询问业务知识/产品规则/流程说明
-                - TROUBLESHOOTING: 包含错误日志/异常堆栈/报错描述
+                - TROUBLESHOOTING: 包含错误日志/异常堆栈/报错描述，或针对某个具体故障提问。
+                  注意：即使以疑问句形式提问（如"为什么XX失败了/报错了/超时了"），
+                  只要指向具体故障，一律归 TROUBLESHOOTING。
+                - KNOWLEDGE_QA: 询问概念/产品规则/流程说明/如何配置，无具体故障现场
+
+                示例：
+                - "为什么放款接口报500错误？" → TROUBLESHOOTING
+                - "什么是资金方接入流程？" → KNOWLEDGE_QA
+                - "如何配置回调地址？" → KNOWLEDGE_QA
+                - "POST /api/loan/apply 放款申请" → INTERFACE_DEV
 
                 用户输入:
                 """ + userInput;

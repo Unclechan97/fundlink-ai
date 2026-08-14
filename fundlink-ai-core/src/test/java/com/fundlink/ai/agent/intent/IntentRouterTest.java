@@ -132,6 +132,59 @@ class IntentRouterTest {
             IntentResult result = router.route(input);
             assertThat(result.getIntentType()).isEqualTo(IntentType.TROUBLESHOOTING);
         }
+
+        // ── 事故提问句式（疑问句但指向具体故障 → 排查，不再误入问答） ──
+
+        @Test
+        @DisplayName("「为什么+失败」疑问句 → 问题排查")
+        void shouldDetectWhyFailed() {
+            String input = "为什么放款接口报500错误？";
+            IntentResult result = router.route(input);
+            assertThat(result.getIntentType()).isEqualTo(IntentType.TROUBLESHOOTING);
+        }
+
+        @Test
+        @DisplayName("「为什么+慢」疑问句 → 问题排查")
+        void shouldDetectWhySlow() {
+            String input = "查询接口为什么这么慢？";
+            IntentResult result = router.route(input);
+            assertThat(result.getIntentType()).isEqualTo(IntentType.TROUBLESHOOTING);
+        }
+
+        @Test
+        @DisplayName("「什么原因+失败」→ 问题排查")
+        void shouldDetectWhatCause() {
+            String input = "放款申请失败了，这是什么原因";
+            IntentResult result = router.route(input);
+            assertThat(result.getIntentType()).isEqualTo(IntentType.TROUBLESHOOTING);
+        }
+
+        @Test
+        @DisplayName("「怎么回事+连不上」→ 问题排查")
+        void shouldDetectConnectionIncident() {
+            String input = "接口连不上了，怎么回事？";
+            IntentResult result = router.route(input);
+            assertThat(result.getIntentType()).isEqualTo(IntentType.TROUBLESHOOTING);
+        }
+
+        @Test
+        @DisplayName("单独故障现场词「报错」→ 问题排查")
+        void shouldDetectBaoCuo() {
+            String input = "这个模板渲染一直报错";
+            IntentResult result = router.route(input);
+            assertThat(result.getIntentType()).isEqualTo(IntentType.TROUBLESHOOTING);
+        }
+
+        @Test
+        @DisplayName("疑问句+错误日志内容 → 问题排查（用户贴日志时带问句）")
+        void shouldDetectQuestionWithErrorLog() {
+            String input = """
+                    这是什么问题？
+                    ERROR 2026-08-14 10:00:00 Template render failed: 模板变量未定义
+                    """;
+            IntentResult result = router.route(input);
+            assertThat(result.getIntentType()).isEqualTo(IntentType.TROUBLESHOOTING);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -172,6 +225,38 @@ class IntentRouterTest {
             String input = "怎么处理资金方返回的异常状态码？";
             IntentResult result = router.route(input);
             assertThat(result.getIntentType()).isEqualTo(IntentType.KNOWLEDGE_QA);
+        }
+
+        @Test
+        @DisplayName("「为什么」无故障词 → 知识问答")
+        void shouldDetectWhyWithoutFailure() {
+            String input = "为什么需要实名认证？";
+            IntentResult result = router.route(input);
+            assertThat(result.getIntentType()).isEqualTo(IntentType.KNOWLEDGE_QA);
+        }
+
+        @Test
+        @DisplayName("定义句式优先于故障词 — 「什么是失败重试策略」→ 知识问答")
+        void shouldPrioritizeDefinitionOverFailureWord() {
+            String input = "什么是失败重试策略？";
+            IntentResult result = router.route(input);
+            assertThat(result.getIntentType()).isEqualTo(IntentType.KNOWLEDGE_QA);
+        }
+
+        @Test
+        @DisplayName("「XX是什么」→ 知识问答")
+        void shouldDetectWhatIsSuffix() {
+            String input = "T+1对账是什么？";
+            IntentResult result = router.route(input);
+            assertThat(result.getIntentType()).isEqualTo(IntentType.KNOWLEDGE_QA);
+        }
+
+        @Test
+        @DisplayName("裸「？」弱特征 → 不再直接判问答，交给 LLM 兜底")
+        void shouldNotForceQaOnBareQuestionMark() {
+            String input = "这块业务是谁负责的？";
+            IntentResult result = router.route(input);
+            assertThat(result.getIntentType()).isEqualTo(IntentType.UNKNOWN);
         }
     }
 
